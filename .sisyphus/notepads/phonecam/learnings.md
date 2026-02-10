@@ -28,3 +28,10 @@
 - For iOS cross-compilation, creating a shell script (`build-xcframework.sh`) that automates `cargo build` for all targets (`aarch64-apple-ios`, `aarch64-apple-ios-sim`, `x86_64-apple-ios`) plus `lipo` merging and `xcodebuild -create-xcframework` significantly streamlines mobile library builds.
 - Tauri v2 desktop apps integrate cleanly with existing Rust crates via workspace dependencies — commands use `#[tauri::command]` macro and tokio for async operations.
 - Sharing a single `phonecam-mobile-core` crate between Android and iOS via `crate-type = ["staticlib", "rlib"]` and platform-specific binding generation (UniFFI for Kotlin/Swift, raw `extern "C"` for frame data) successfully decouples cross-platform mobile logic from native UI code.
+
+## 2026-02-11 (Wave 2 - Android)
+
+- cargo-ndk integration in Gradle: Create `buildRustAndroid` task that invokes `cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 -o <output-dir> build --release` to cross-compile for all Android architectures and place shared libraries in correct JNI directory structure.
+- UniFFI Kotlin binding generation: `uniffi-bindgen generate <udl-file> --language kotlin --out-dir <dir>` produces `.kt` files that can be added to Kotlin source sets via `kotlin.sourceSets.getByName("main").kotlin.srcDir()`.
+- For Android unit tests that call Rust FFI, build host cdylib target and set JNA_LIBRARY_PATH to `target/debug` so JNA can load the native library in JVM context.
+- Android MainActivity uses JNA `Native.load()` to load Rust shared library and call raw extern "C" functions, with manual memory management for C string returns (call `phonecam_string_free()`).

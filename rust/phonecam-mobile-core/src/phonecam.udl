@@ -1,3 +1,7 @@
 namespace phonecam_mobile_core {
     string ffi_test_message();
+    void configure_endpoint(string host, u16 port);
+    string current_endpoint();
+    void set_streaming_enabled(boolean enabled);
+    boolean is_streaming_enabled();
 };

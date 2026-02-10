@@ -26,3 +26,9 @@
 - Tauri desktop app (TODO 5) requires system GTK dependencies on Linux (`glib-2.0`, `gio-2.0`, `gobject-2.0`, `gdk-3.0`). Build and tests fail on Linux without installing `libgtk-3-dev` and related packages via apt/yum. This is a known Tauri requirement for Linux desktop apps.
 - Tauri build verification on Linux requires: `sudo apt-get install libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev` (or equivalent for other distros).
 - iOS xcodebuild verification requires macOS environment — Linux CI can only verify Rust cross-compilation and tests, not full Xcode builds.
+
+## 2026-02-11 (Wave 2 - Android)
+
+- Android build requires Android SDK configured via ANDROID_HOME or local.properties (sdk.dir). Gradle build fails with "SDK location not found" on CI environments without Android SDK installed.
+- cargo-ndk must be installed (`cargo install cargo-ndk`) for cross-compilation to work.
+- uniffi-bindgen CLI must be installed (`cargo install uniffi --features cli`) for Kotlin binding generation.

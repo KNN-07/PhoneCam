@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.phonecam.app.RustBridgeTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-02-10T17:09:42" hostname="normanubuntuserver" time="0.067">
+  <properties/>
+  <testcase name="kotlin_can_call_rust_ffi_test_message" classname="com.phonecam.app.RustBridgeTest" time="0.067"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

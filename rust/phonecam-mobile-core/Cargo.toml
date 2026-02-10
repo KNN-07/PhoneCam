@@ -9,7 +9,7 @@ build = "build.rs"
 
 [lib]
 name = "phonecam_mobile_core"
-crate-type = ["staticlib", "rlib"]
+crate-type = ["cdylib", "staticlib", "rlib"]
 
 [dependencies]
 phonecam-protocol = { path = "../phonecam-protocol" }

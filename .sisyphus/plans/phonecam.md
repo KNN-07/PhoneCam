@@ -581,7 +581,7 @@ Parallel Speedup: ~60% faster than sequential (Waves 3 and 4 have 5-6 parallel t
 
 ---
 
-- [ ] 6. Android Project + Rust FFI Setup
+- [x] 6. Android Project + Rust FFI Setup
 
   **What to do**:
   - Create Android project in `android/` with Kotlin, Gradle, minSdk 26 (Android 8.0+)

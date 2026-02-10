@@ -11,14 +11,73 @@ struct FrameMetadata {
     is_keyframe: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CoreConfig {
+    endpoint_host: String,
+    endpoint_port: u16,
+    streaming_enabled: bool,
+}
+
+impl Default for CoreConfig {
+    fn default() -> Self {
+        Self {
+            endpoint_host: "127.0.0.1".to_string(),
+            endpoint_port: 7878,
+            streaming_enabled: false,
+        }
+    }
+}
+
 static LAST_FRAME: OnceLock<Mutex<Option<FrameMetadata>>> = OnceLock::new();
+static CORE_CONFIG: OnceLock<Mutex<CoreConfig>> = OnceLock::new();
 
 fn last_frame_slot() -> &'static Mutex<Option<FrameMetadata>> {
     LAST_FRAME.get_or_init(|| Mutex::new(None))
 }
 
+fn core_config_slot() -> &'static Mutex<CoreConfig> {
+    CORE_CONFIG.get_or_init(|| Mutex::new(CoreConfig::default()))
+}
+
 pub fn ffi_test_message() -> String {
     "phonecam-mobile-core ffi ok".to_string()
+}
+
+pub fn configure_endpoint(host: String, port: u16) {
+    if host.trim().is_empty() {
+        return;
+    }
+
+    if let Ok(mut config) = core_config_slot().lock() {
+        config.endpoint_host = host;
+        config.endpoint_port = port;
+    }
+}
+
+pub fn current_endpoint() -> String {
+    if let Ok(config) = core_config_slot().lock() {
+        return format!("{}:{}", config.endpoint_host, config.endpoint_port);
+    }
+
+    format!(
+        "{}:{}",
+        CoreConfig::default().endpoint_host,
+        CoreConfig::default().endpoint_port
+    )
+}
+
+pub fn set_streaming_enabled(enabled: bool) {
+    if let Ok(mut config) = core_config_slot().lock() {
+        config.streaming_enabled = enabled;
+    }
+}
+
+pub fn is_streaming_enabled() -> bool {
+    if let Ok(config) = core_config_slot().lock() {
+        return config.streaming_enabled;
+    }
+
+    false
 }
 
 /// Raw C FFI entry point for high-frequency H.264 frame payload submission.
@@ -72,20 +131,40 @@ fn latest_frame_metadata() -> Option<FrameMetadata> {
     last_frame_slot().lock().ok().and_then(|slot| *slot)
 }
 
+#[cfg(test)]
+fn current_config() -> CoreConfig {
+    core_config_slot()
+        .lock()
+        .map(|config| config.clone())
+        .unwrap_or_default()
+}
+
 uniffi::include_scaffolding!("phonecam");
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::ffi::CStr;
+    use std::sync::{Mutex, OnceLock};
+
+    static TEST_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
+
+    fn test_lock() -> std::sync::MutexGuard<'static, ()> {
+        TEST_MUTEX
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("test mutex should not be poisoned")
+    }
 
     #[test]
     fn ffi_test_message_is_available() {
+        let _lock = test_lock();
         assert_eq!(ffi_test_message(), "phonecam-mobile-core ffi ok");
     }
 
     #[test]
     fn send_video_frame_records_metadata() {
+        let _lock = test_lock();
         let sample = [0x00_u8, 0x00, 0x01, 0x65];
 
         // SAFETY: Valid pointer/length pair from an in-scope byte array.
@@ -101,6 +180,7 @@ mod tests {
 
     #[test]
     fn c_string_message_roundtrip_and_free() {
+        let _lock = test_lock();
         let ptr = phonecam_ffi_test_message();
         assert!(!ptr.is_null());
 
@@ -116,5 +196,29 @@ mod tests {
         unsafe {
             phonecam_string_free(ptr);
         }
+    }
+
+    #[test]
+    fn endpoint_configuration_roundtrip() {
+        let _lock = test_lock();
+
+        configure_endpoint("192.168.1.25".to_string(), 9000);
+
+        assert_eq!(current_endpoint(), "192.168.1.25:9000");
+
+        let config = current_config();
+        assert_eq!(config.endpoint_host, "192.168.1.25");
+        assert_eq!(config.endpoint_port, 9000);
+    }
+
+    #[test]
+    fn streaming_enable_flag_can_toggle() {
+        let _lock = test_lock();
+
+        set_streaming_enabled(true);
+        assert!(is_streaming_enabled());
+
+        set_streaming_enabled(false);
+        assert!(!is_streaming_enabled());
     }
 }
