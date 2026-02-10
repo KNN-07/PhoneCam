@@ -11,3 +11,6 @@
 - In `mdns-sd`, creating `ServiceInfo` with `ip=""` plus `.enable_addr_auto()` allows the daemon to advertise host interface addresses automatically (useful for IPv4/IPv6 and multi-interface support).
 - `ServiceEvent::ServiceResolved` returns `ScopedIp` values; converting each with `to_ip_addr()` is the cleanest way to surface standard `IpAddr` values in crate APIs.
 - For deterministic mDNS tests, injecting a custom daemon port (`ServiceDaemon::new_with_port`) for both publisher and browser avoids collisions with system mDNS services.
+
+- For Tauri v2 desktop apps, `src-tauri` should be the Rust crate root. `tauri.conf.json` schema v2 places `identifier` at the top level, removing it from `bundle` object.
+- Validating Tauri frontend UI with Playwright + Vite dev server (`npm run dev`) works even if the Rust backend fails to build due to missing system dependencies. This decouples UI verification from backend compilation in CI.

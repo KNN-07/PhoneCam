@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PhoneCam</title>
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <div class="app-container">
+      <header class="header">
+        <h1>PhoneCam</h1>
+        <div id="status-indicator" class="status disconnected">
+          <span class="status-dot"></span>
+          <span class="status-text">Disconnected</span>
+        </div>
+      </header>
+
+      <main class="main-content">
+        <section class="discovery-section">
+          <h2>Discovered Devices</h2>
+          <div class="device-list-container">
+            <ul id="device-list" class="device-list">
+              <li class="device-item empty-state">Scanning for devices...</li>
+            </ul>
+          </div>
+        </section>
+
+        <section class="manual-connect-section">
+          <h2>Manual Connection</h2>
+          <div class="input-group">
+            <input type="text" id="ip-input" placeholder="Device IP Address" class="input-field" />
+            <input type="number" id="port-input" value="8080" placeholder="Port" class="input-field port-field" />
+          </div>
+          <div class="action-group">
+            <button id="connect-btn" class="btn primary-btn">Connect</button>
+            <button id="disconnect-btn" class="btn secondary-btn" disabled>Disconnect</button>
+          </div>
+        </section>
+      </main>
+      
+      <footer class="footer">
+        <p>PhoneCam Desktop v0.1.0</p>
+      </footer>
+    </div>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

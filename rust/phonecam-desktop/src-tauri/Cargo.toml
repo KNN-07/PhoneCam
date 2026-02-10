@@ -1,0 +1,23 @@
+[package]
+name = "phonecam-desktop"
+version = "0.1.0"
+description = "PhoneCam desktop client"
+authors = ["PhoneCam Contributors"]
+edition = "2021"
+rust-version = "1.77"
+
+[build-dependencies]
+tauri-build = { version = "2.0.0", features = [] }
+
+[dependencies]
+tauri = { version = "2.0.0", features = [] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+log = "0.4"
+env_logger = "0.10"
+
+
+phonecam-transport = { path = "../../phonecam-transport" }
+phonecam-discovery = { path = "../../phonecam-discovery" }
+phonecam-protocol = { path = "../../phonecam-protocol" }
