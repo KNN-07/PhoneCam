@@ -1,8 +1,12 @@
 #![allow(dead_code)]
 
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::sync::{Mutex, OnceLock};
+
+use phonecam_protocol::{Message, VideoFrame};
+use phonecam_transport::{PhoneCamClient, TransportConnection};
+use tokio::runtime::{Builder, Runtime};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct FrameMetadata {
@@ -16,6 +20,8 @@ struct CoreConfig {
     endpoint_host: String,
     endpoint_port: u16,
     streaming_enabled: bool,
+    video_width: u16,
+    video_height: u16,
 }
 
 impl Default for CoreConfig {
@@ -24,12 +30,20 @@ impl Default for CoreConfig {
             endpoint_host: "127.0.0.1".to_string(),
             endpoint_port: 7878,
             streaming_enabled: false,
+            video_width: 1280,
+            video_height: 720,
         }
     }
 }
 
+struct TransportClient {
+    runtime: Runtime,
+    connection: TransportConnection,
+}
+
 static LAST_FRAME: OnceLock<Mutex<Option<FrameMetadata>>> = OnceLock::new();
 static CORE_CONFIG: OnceLock<Mutex<CoreConfig>> = OnceLock::new();
+static TRANSPORT_CLIENT: OnceLock<Mutex<Option<TransportClient>>> = OnceLock::new();
 
 fn last_frame_slot() -> &'static Mutex<Option<FrameMetadata>> {
     LAST_FRAME.get_or_init(|| Mutex::new(None))
@@ -37,6 +51,10 @@ fn last_frame_slot() -> &'static Mutex<Option<FrameMetadata>> {
 
 fn core_config_slot() -> &'static Mutex<CoreConfig> {
     CORE_CONFIG.get_or_init(|| Mutex::new(CoreConfig::default()))
+}
+
+fn transport_client_slot() -> &'static Mutex<Option<TransportClient>> {
+    TRANSPORT_CLIENT.get_or_init(|| Mutex::new(None))
 }
 
 pub fn ffi_test_message() -> String {
@@ -72,12 +90,72 @@ pub fn set_streaming_enabled(enabled: bool) {
     }
 }
 
+pub fn set_video_resolution(width: u16, height: u16) {
+    if width == 0 || height == 0 {
+        return;
+    }
+
+    if let Ok(mut config) = core_config_slot().lock() {
+        config.video_width = width;
+        config.video_height = height;
+    }
+}
+
+fn video_resolution() -> (u16, u16) {
+    if let Ok(config) = core_config_slot().lock() {
+        return (config.video_width, config.video_height);
+    }
+
+    (
+        CoreConfig::default().video_width,
+        CoreConfig::default().video_height,
+    )
+}
+
 pub fn is_streaming_enabled() -> bool {
     if let Ok(config) = core_config_slot().lock() {
         return config.streaming_enabled;
     }
 
     false
+}
+
+fn initialize_transport_client(host: String, port: u16) -> bool {
+    if host.trim().is_empty() {
+        return false;
+    }
+
+    let endpoint = format!("{}:{}", host, port);
+    let runtime = match Builder::new_multi_thread()
+        .enable_all()
+        .worker_threads(2)
+        .thread_name("phonecam-mobile-transport")
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(_) => return false,
+    };
+
+    let connection = match runtime.block_on(PhoneCamClient::connect(endpoint.clone())) {
+        Ok(connection) => connection,
+        Err(_) => return false,
+    };
+
+    if let Ok(mut slot) = transport_client_slot().lock() {
+        *slot = Some(TransportClient {
+            runtime,
+            connection,
+        });
+        return true;
+    }
+
+    false
+}
+
+fn shutdown_transport_client() {
+    if let Ok(mut slot) = transport_client_slot().lock() {
+        *slot = None;
+    }
 }
 
 /// Raw C FFI entry point for high-frequency H.264 frame payload submission.
@@ -97,6 +175,27 @@ pub unsafe extern "C" fn phonecam_send_video_frame(
     // SAFETY: The caller provides a non-null pointer and length for the duration of this call.
     let _payload = unsafe { std::slice::from_raw_parts(data, len) };
 
+    if let Ok(mut slot) = transport_client_slot().lock() {
+        if let Some(client) = slot.as_mut() {
+            let (width, height) = video_resolution();
+            let message = Message::VideoFrame(VideoFrame {
+                nal_unit: _payload.to_vec().into(),
+                pts_us: pts,
+                width,
+                height,
+                is_keyframe,
+            });
+
+            match client.connection.sender().try_send(message) {
+                Ok(()) => {}
+                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                    *slot = None;
+                }
+                Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {}
+            }
+        }
+    }
+
     if let Ok(mut slot) = last_frame_slot().lock() {
         *slot = Some(FrameMetadata {
             len,
@@ -104,6 +203,42 @@ pub unsafe extern "C" fn phonecam_send_video_frame(
             is_keyframe,
         });
     }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn phonecam_transport_init(host: *const c_char, port: u16) -> bool {
+    if host.is_null() {
+        return false;
+    }
+
+    if port == 0 {
+        return false;
+    }
+
+    let host = match unsafe { CStr::from_ptr(host) }.to_str() {
+        Ok(host) => host.trim(),
+        Err(_) => return false,
+    };
+
+    if host.is_empty() {
+        return false;
+    }
+
+    configure_endpoint(host.to_string(), port);
+    let initialized = initialize_transport_client(host.to_string(), port);
+    set_streaming_enabled(initialized);
+    initialized
+}
+
+#[no_mangle]
+pub extern "C" fn phonecam_transport_shutdown() {
+    set_streaming_enabled(false);
+    shutdown_transport_client();
+}
+
+#[no_mangle]
+pub extern "C" fn phonecam_set_video_resolution(width: u16, height: u16) {
+    set_video_resolution(width, height);
 }
 
 #[no_mangle]
@@ -220,5 +355,16 @@ mod tests {
 
         set_streaming_enabled(false);
         assert!(!is_streaming_enabled());
+    }
+
+    #[test]
+    fn video_resolution_roundtrip_updates_config() {
+        let _lock = test_lock();
+
+        set_video_resolution(1920, 1080);
+
+        let config = current_config();
+        assert_eq!(config.video_width, 1920);
+        assert_eq!(config.video_height, 1080);
     }
 }

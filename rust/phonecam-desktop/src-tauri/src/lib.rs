@@ -4,6 +4,9 @@ use phonecam_transport::client::PhoneCamClient;
 use phonecam_discovery::{ServiceBrowser, DiscoveredService};
 use tokio::sync::Mutex as TokioMutex;
 
+pub mod convert;
+pub mod decode;
+
 pub struct AppState {
     pub client: Arc<TokioMutex<Option<PhoneCamClient>>>,
     pub discovered_devices: Arc<Mutex<Vec<DiscoveredService>>>,

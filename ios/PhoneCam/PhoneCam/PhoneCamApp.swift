@@ -2,7 +2,16 @@ import SwiftUI
 
 @main
 struct PhoneCamApp: App {
+    @StateObject private var cameraController: CameraController
+    @StateObject private var streamManager: StreamManager
+
     init() {
+        let cameraController = CameraController()
+        let streamManager = StreamManager(cameraController: cameraController)
+
+        _cameraController = StateObject(wrappedValue: cameraController)
+        _streamManager = StateObject(wrappedValue: streamManager)
+
         let uniffiMessage = ffiTestMessage()
         print("FFI test (UniFFI): \(uniffiMessage)")
 
@@ -17,7 +26,10 @@ struct PhoneCamApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(
+                cameraController: cameraController,
+                streamManager: streamManager
+            )
         }
     }
 }
