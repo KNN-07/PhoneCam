@@ -1,0 +1,12 @@
+[package]
+name = "phonecam-transport"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+tokio.workspace = true
+thiserror.workspace = true
+phonecam-protocol = { path = "../phonecam-protocol" }
