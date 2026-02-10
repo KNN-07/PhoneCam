@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+members = [
+    "rust/phonecam-protocol",
+    "rust/phonecam-transport",
+    "rust/phonecam-discovery",
+    "rust/phonecam-desktop",
+    "rust/phonecam-driver-linux",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["PhoneCam Contributors"]
+license = "Apache-2.0"
+repository = "https://github.com/PhoneCam/PhoneCam"
+
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+tokio = { version = "1.0", features = ["full"] }
+thiserror = "2.0"
