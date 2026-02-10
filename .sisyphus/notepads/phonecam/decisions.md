@@ -3,3 +3,7 @@
 - Chose `bincode` (serde mode) as the binary serializer due to straightforward `encode_to_vec` / `decode_from_slice` APIs and explicit Context7-backed guidance.
 - Implemented wire format as: `[u32 BE length][u8 message_type][payload]`, where payload is serialized per concrete message type (not full enum serialization), to keep type-byte control explicit and protocol-stable.
 - Modeled `AudioFrame` as a deprecated message type (`#[deprecated(note = "Reserved for v2")]`) and allowed codec round-trip tests without adding any runtime audio pipeline behavior.
+
+- Implemented `phonecam-transport` as a single-connection TCP design (`PhoneCamServer::accept` handles one stream instance) to match v1 scope and simplify state management.
+- Chose `watch::channel<ConnectionState>` for state visibility and testability, with transitions driven by connect/accept and handshake reception.
+- Kept keepalive in transport layer using periodic framed `StatusUpdate` pings and 5-second receive timeout, avoiding protocol surface expansion.

@@ -308,7 +308,7 @@ Parallel Speedup: ~60% faster than sequential (Waves 3 and 4 have 5-6 parallel t
 
 ---
 
-- [ ] 2. `phonecam-protocol` Crate — Wire Format + Message Types
+- [x] 2. `phonecam-protocol` Crate — Wire Format + Message Types
 
   **What to do**:
   - **RED**: Write tests first for all message types and serialization round-trips
@@ -383,7 +383,7 @@ Parallel Speedup: ~60% faster than sequential (Waves 3 and 4 have 5-6 parallel t
 
 ---
 
-- [ ] 3. `phonecam-transport` Crate — TCP Transport + Connection Management
+- [x] 3. `phonecam-transport` Crate — TCP Transport + Connection Management
 
   **What to do**:
   - **RED**: Write tests for TCP connection lifecycle, message sending/receiving, concurrent streams
