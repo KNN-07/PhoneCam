@@ -7,3 +7,8 @@
 - Implemented `phonecam-transport` as a single-connection TCP design (`PhoneCamServer::accept` handles one stream instance) to match v1 scope and simplify state management.
 - Chose `watch::channel<ConnectionState>` for state visibility and testability, with transitions driven by connect/accept and handshake reception.
 - Kept keepalive in transport layer using periodic framed `StatusUpdate` pings and 5-second receive timeout, avoiding protocol surface expansion.
+
+- Implemented discovery API with explicit `ServicePublisher` (desktop-side registration) and `ServiceBrowser` (mobile-side browse) wrappers over `mdns-sd` to keep platform integration straightforward.
+- Added `publish_with_mdns_port` / `new_with_mdns_port` constructors so tests can run against isolated mDNS ports while production defaults remain port 5353.
+- Modeled discovered results as one record per resolved IP address (`{name, ip, port, version}`), preserving both IPv4 and IPv6 addresses returned by mDNS.
+- Implemented QR data format as a simple URI parser/formatter (`phonecam://IP:PORT?name=DEVICE_NAME`) with IPv6 bracket handling (`[::1]:PORT`).
