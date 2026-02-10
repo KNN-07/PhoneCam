@@ -12,3 +12,9 @@
 - Added `publish_with_mdns_port` / `new_with_mdns_port` constructors so tests can run against isolated mDNS ports while production defaults remain port 5353.
 - Modeled discovered results as one record per resolved IP address (`{name, ip, port, version}`), preserving both IPv4 and IPv6 addresses returned by mDNS.
 - Implemented QR data format as a simple URI parser/formatter (`phonecam://IP:PORT?name=DEVICE_NAME`) with IPv6 bracket handling (`[::1]:PORT`).
+
+## 2026-02-10 (Wave 2)
+
+- Tauri desktop app structure: Main crate at `rust/phonecam-desktop/src-tauri/` (following Tauri conventions), frontend assets at `rust/phonecam-desktop/` root.
+- Desktop app uses background tokio task in `.setup()` to continuously run mDNS discovery every 3 seconds, updating shared state for frontend to query via `get_discovered_devices()` command.
+- Connection management: Single client instance stored in `Arc<TokioMutex<Option<PhoneCamClient>>>` allows atomic connect/disconnect via Tauri commands while preventing multiple simultaneous connections.

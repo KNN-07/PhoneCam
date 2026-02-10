@@ -460,7 +460,7 @@ Parallel Speedup: ~60% faster than sequential (Waves 3 and 4 have 5-6 parallel t
 
 ---
 
-- [ ] 4. `phonecam-discovery` Crate — mDNS Service Discovery
+- [x] 4. `phonecam-discovery` Crate — mDNS Service Discovery
 
   **What to do**:
   - **RED**: Write tests for service registration and discovery
@@ -519,7 +519,7 @@ Parallel Speedup: ~60% faster than sequential (Waves 3 and 4 have 5-6 parallel t
 
 ---
 
-- [ ] 5. Tauri Desktop App Skeleton
+- [x] 5. Tauri Desktop App Skeleton
 
   **What to do**:
   - Initialize Tauri v2 project in `rust/phonecam-desktop/`
@@ -643,7 +643,7 @@ Parallel Speedup: ~60% faster than sequential (Waves 3 and 4 have 5-6 parallel t
 
 ---
 
-- [ ] 7. iOS Project + Rust FFI Setup
+- [x] 7. iOS Project + Rust FFI Setup
 
   **What to do**:
   - Create Xcode project in `ios/PhoneCam/` with Swift, minimum deployment target iOS 15.0
