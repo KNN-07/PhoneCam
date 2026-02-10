@@ -1,0 +1,5 @@
+## 2026-02-10
+
+- Chose `bincode` (serde mode) as the binary serializer due to straightforward `encode_to_vec` / `decode_from_slice` APIs and explicit Context7-backed guidance.
+- Implemented wire format as: `[u32 BE length][u8 message_type][payload]`, where payload is serialized per concrete message type (not full enum serialization), to keep type-byte control explicit and protocol-stable.
+- Modeled `AudioFrame` as a deprecated message type (`#[deprecated(note = "Reserved for v2")]`) and allowed codec round-trip tests without adding any runtime audio pipeline behavior.
