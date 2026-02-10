@@ -1,0 +1,336 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A1B2C3D4E5F6010000000001 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6020000000002 /* ContentView.swift */; };
+		A1B2C3D4E5F6010000000002 /* PhoneCamApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6020000000003 /* PhoneCamApp.swift */; };
+		A1B2C3D4E5F6010000000003 /* phonecam_mobile_core.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6020000000006 /* phonecam_mobile_core.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A1B2C3D4E5F6020000000001 /* PhoneCam.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PhoneCam.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A1B2C3D4E5F6020000000002 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F6020000000003 /* PhoneCamApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneCamApp.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F6020000000004 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A1B2C3D4E5F6020000000005 /* PhoneCam-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "PhoneCam-Bridging-Header.h"; sourceTree = "<group>"; };
+		A1B2C3D4E5F6020000000006 /* phonecam_mobile_core.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = phonecam_mobile_core.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F6020000000007 /* phonecam_mobile_coreFFI.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = phonecam_mobile_coreFFI.h; sourceTree = "<group>"; };
+		A1B2C3D4E5F6020000000008 /* phonecam_mobile_coreFFI.modulemap */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.module-map; path = phonecam_mobile_coreFFI.modulemap; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A1B2C3D4E5F6030000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A1B2C3D4E5F6040000000001 = {
+			isa = PBXGroup;
+			children = (
+				A1B2C3D4E5F6040000000003 /* PhoneCam */,
+				A1B2C3D4E5F6040000000002 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A1B2C3D4E5F6040000000002 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A1B2C3D4E5F6020000000001 /* PhoneCam.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		A1B2C3D4E5F6040000000003 /* PhoneCam */ = {
+			isa = PBXGroup;
+			children = (
+				A1B2C3D4E5F6020000000002 /* ContentView.swift */,
+				A1B2C3D4E5F6020000000003 /* PhoneCamApp.swift */,
+				A1B2C3D4E5F6020000000004 /* Info.plist */,
+				A1B2C3D4E5F6020000000005 /* PhoneCam-Bridging-Header.h */,
+				A1B2C3D4E5F6040000000004 /* Generated */,
+			);
+			path = PhoneCam;
+			sourceTree = "<group>";
+		};
+		A1B2C3D4E5F6040000000004 /* Generated */ = {
+			isa = PBXGroup;
+			children = (
+				A1B2C3D4E5F6020000000006 /* phonecam_mobile_core.swift */,
+				A1B2C3D4E5F6020000000007 /* phonecam_mobile_coreFFI.h */,
+				A1B2C3D4E5F6020000000008 /* phonecam_mobile_coreFFI.modulemap */,
+			);
+			path = Generated;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A1B2C3D4E5F6050000000001 /* PhoneCam */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A1B2C3D4E5F60A0000000002 /* Build configuration list for PBXNativeTarget \"PhoneCam\" */;
+			buildPhases = (
+				A1B2C3D4E5F6080000000001 /* Sources */,
+				A1B2C3D4E5F6030000000001 /* Frameworks */,
+				A1B2C3D4E5F6070000000001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PhoneCam;
+			productName = PhoneCam;
+			productReference = A1B2C3D4E5F6020000000001 /* PhoneCam.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A1B2C3D4E5F6060000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					A1B2C3D4E5F6050000000001 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+				};
+			};
+			buildConfigurationList = A1B2C3D4E5F60A0000000001 /* Build configuration list for PBXProject \"PhoneCam\" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = A1B2C3D4E5F6040000000001;
+			productRefGroup = A1B2C3D4E5F6040000000002 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A1B2C3D4E5F6050000000001 /* PhoneCam */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A1B2C3D4E5F6070000000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A1B2C3D4E5F6080000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A1B2C3D4E5F6010000000001 /* ContentView.swift in Sources */,
+				A1B2C3D4E5F6010000000002 /* PhoneCamApp.swift in Sources */,
+				A1B2C3D4E5F6010000000003 /* phonecam_mobile_core.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		A1B2C3D4E5F6090000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		A1B2C3D4E5F6090000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		A1B2C3D4E5F6090000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "";
+				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/PhoneCam/Generated",
+				);
+				INFOPLIST_FILE = PhoneCam/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				"LIBRARY_SEARCH_PATHS[sdk=iphoneos*][arch=arm64]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/../../target/aarch64-apple-ios/$(CONFIGURATION)",
+				);
+				"LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*][arch=arm64]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/../../target/aarch64-apple-ios-sim/$(CONFIGURATION)",
+				);
+				"LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*][arch=x86_64]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/../../target/x86_64-apple-ios/$(CONFIGURATION)",
+				);
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lphonecam_mobile_core",
+				);
+				OTHER_SWIFT_FLAGS = (
+					"$(inherited)",
+					"-Xcc",
+					"-fmodule-map-file=$(PROJECT_DIR)/PhoneCam/Generated/phonecam_mobile_coreFFI.modulemap",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.phonecam.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphonesimulator iphoneos";
+				SWIFT_INCLUDE_PATHS = "$(PROJECT_DIR)/PhoneCam/Generated";
+				SWIFT_OBJC_BRIDGING_HEADER = "PhoneCam/PhoneCam-Bridging-Header.h";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A1B2C3D4E5F6090000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "";
+				CODE_SIGN_STYLE = Automatic;
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/PhoneCam/Generated",
+				);
+				INFOPLIST_FILE = PhoneCam/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				"LIBRARY_SEARCH_PATHS[sdk=iphoneos*][arch=arm64]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/../../target/aarch64-apple-ios/$(CONFIGURATION)",
+				);
+				"LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*][arch=arm64]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/../../target/aarch64-apple-ios-sim/$(CONFIGURATION)",
+				);
+				"LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*][arch=x86_64]" = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/../../target/x86_64-apple-ios/$(CONFIGURATION)",
+				);
+				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lphonecam_mobile_core",
+				);
+				OTHER_SWIFT_FLAGS = (
+					"$(inherited)",
+					"-Xcc",
+					"-fmodule-map-file=$(PROJECT_DIR)/PhoneCam/Generated/phonecam_mobile_coreFFI.modulemap",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.phonecam.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphonesimulator iphoneos";
+				SWIFT_INCLUDE_PATHS = "$(PROJECT_DIR)/PhoneCam/Generated";
+				SWIFT_OBJC_BRIDGING_HEADER = "PhoneCam/PhoneCam-Bridging-Header.h";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A1B2C3D4E5F60A0000000001 /* Build configuration list for PBXProject "PhoneCam" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1B2C3D4E5F6090000000001 /* Debug */,
+				A1B2C3D4E5F6090000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A1B2C3D4E5F60A0000000002 /* Build configuration list for PBXNativeTarget "PhoneCam" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1B2C3D4E5F6090000000003 /* Debug */,
+				A1B2C3D4E5F6090000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = A1B2C3D4E5F6060000000001 /* Project object */;
+}

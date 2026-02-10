@@ -1,0 +1,20 @@
+[package]
+name = "phonecam-mobile-core"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+build = "build.rs"
+
+[lib]
+name = "phonecam_mobile_core"
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+phonecam-protocol = { path = "../phonecam-protocol" }
+phonecam-transport = { path = "../phonecam-transport" }
+uniffi.workspace = true
+
+[build-dependencies]
+uniffi = { workspace = true, features = ["build"] }
