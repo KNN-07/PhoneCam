@@ -1,0 +1,14 @@
+/target
+/dist
+/node_modules
+.DS_Store
+Thumbs.db
+*.log
+.env
+.env.*
+!.env.example
+.vscode/
+.idea/
+*.swp
+*.swo
+Cargo.lock
