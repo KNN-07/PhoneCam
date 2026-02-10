@@ -35,3 +35,10 @@
 - UniFFI Kotlin binding generation: `uniffi-bindgen generate <udl-file> --language kotlin --out-dir <dir>` produces `.kt` files that can be added to Kotlin source sets via `kotlin.sourceSets.getByName("main").kotlin.srcDir()`.
 - For Android unit tests that call Rust FFI, build host cdylib target and set JNA_LIBRARY_PATH to `target/debug` so JNA can load the native library in JVM context.
 - Android MainActivity uses JNA `Native.load()` to load Rust shared library and call raw extern "C" functions, with manual memory management for C string returns (call `phonecam_string_free()`).
+
+## 2026-02-11 (Wave 3 - Linux Driver)
+
+- v4l2loopback module detection via `/sys/module/v4l2loopback` path check is reliable and doesn't require root.
+- The `v4l` crate provides safe Rust bindings for V4L2 ioctls via `context::enum_devices()` for device enumeration.
+- Structured error types with installation instructions per distro (Ubuntu/Debian, Fedora, Arch) improve UX when module not loaded.
+- Minimal stub implementation strategy: module detection + error handling first, actual frame writing deferred until H.264 decode pipeline exists.

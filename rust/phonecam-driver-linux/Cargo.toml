@@ -10,3 +10,8 @@ repository.workspace = true
 tokio.workspace = true
 thiserror.workspace = true
 phonecam-protocol = { path = "../phonecam-protocol" }
+v4l = "0.14"
+nix = { version = "0.29", features = ["ioctl"] }
+
+[dev-dependencies]
+tempfile = "3.10"

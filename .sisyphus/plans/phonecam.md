@@ -704,7 +704,7 @@ Parallel Speedup: ~60% faster than sequential (Waves 3 and 4 have 5-6 parallel t
 
 ---
 
-- [ ] 8. Linux v4l2loopback Driver Integration
+- [x] 8. Linux v4l2loopback Driver Integration
 
   **What to do**:
   - **RED**: Write tests for v4l2loopback device detection, creation, and frame writing
