@@ -842,7 +842,7 @@ Parallel Speedup: ~60% faster than sequential (Waves 3 and 4 have 5-6 parallel t
 
 ---
 
-- [ ] 10. macOS CMIO Camera Extension (Swift)
+- [x] 10. macOS CMIO Camera Extension (Swift)
 
   **What to do**:
   - Create Swift Xcode project in `apple/PhoneCamDriver/` as a Camera Extension target
