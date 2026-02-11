@@ -779,7 +779,7 @@ Parallel Speedup: ~60% faster than sequential (Waves 3 and 4 have 5-6 parallel t
 
 ---
 
-- [ ] 9. Desktop H.264 Decode Pipeline
+- [x] 9. Desktop H.264 Decode Pipeline
 
   **What to do**:
   - **RED**: Write tests for H.264 NAL unit decoding to raw frames
@@ -971,7 +971,7 @@ Parallel Speedup: ~60% faster than sequential (Waves 3 and 4 have 5-6 parallel t
 
 ---
 
-- [ ] 12. Android Camera Capture + H.264 Encoding
+- [x] 12. Android Camera Capture + H.264 Encoding
 
   **What to do**:
   - Implement camera capture using CameraX (Jetpack) in Android app
@@ -1038,7 +1038,7 @@ Parallel Speedup: ~60% faster than sequential (Waves 3 and 4 have 5-6 parallel t
 
 ---
 
-- [ ] 13. iOS Camera Capture + H.264 Encoding
+- [x] 13. iOS Camera Capture + H.264 Encoding
 
   **What to do**:
   - Implement camera capture using AVFoundation in iOS app
