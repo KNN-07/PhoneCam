@@ -16,6 +16,9 @@ pub mod pipeline;
 #[cfg(target_os = "macos")]
 pub mod driver_macos;
 
+#[cfg(target_os = "windows")]
+pub mod driver_windows;
+
 pub struct AppState {
     pub pipeline: pipeline::PipelineManager,
     pub discovered_devices: Arc<Mutex<Vec<DiscoveredService>>>,

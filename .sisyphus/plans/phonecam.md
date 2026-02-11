@@ -1230,7 +1230,7 @@ Parallel Speedup: ~60% faster than sequential (Waves 3 and 4 have 5-6 parallel t
 
 ---
 
-- [ ] 16. Windows Desktop Integration (Tauri + COM Driver)
+- [x] 16. Windows Desktop Integration (Tauri + COM Driver)
 
   **What to do**:
   - Implement IPC bridge from Tauri Rust backend to Windows virtual camera COM DLL
