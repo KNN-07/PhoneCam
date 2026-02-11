@@ -96,11 +96,7 @@ pub(crate) async fn build_connection(
     let (read_half, write_half) = stream.into_split();
 
     let writer_handle = tokio::spawn(writer_loop(write_half, outbound_rx));
-    let reader_handle = tokio::spawn(reader_loop(
-        read_half,
-        inbound_tx,
-        state_tx.clone(),
-    ));
+    let reader_handle = tokio::spawn(reader_loop(read_half, inbound_tx, state_tx.clone()));
 
     let lifecycle = tokio::spawn(async move {
         tokio::pin!(writer_handle);
@@ -185,7 +181,10 @@ async fn reader_loop(
     }
 }
 
-async fn write_message(write_half: &mut OwnedWriteHalf, message: &Message) -> Result<(), TransportError> {
+async fn write_message(
+    write_half: &mut OwnedWriteHalf,
+    message: &Message,
+) -> Result<(), TransportError> {
     let encoded = encode_frame(message)?;
     write_half.write_all(&encoded).await?;
     Ok(())

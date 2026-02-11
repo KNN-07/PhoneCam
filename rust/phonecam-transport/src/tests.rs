@@ -4,7 +4,11 @@ use phonecam_protocol::{Handshake, Message, StatusUpdate, VideoFrame};
 
 use crate::{ConnectionState, PhoneCamClient, PhoneCamServer, TransportConnection};
 
-async fn wait_for_state(connection: &TransportConnection, expected: ConnectionState, timeout: Duration) {
+async fn wait_for_state(
+    connection: &TransportConnection,
+    expected: ConnectionState,
+    timeout: Duration,
+) {
     let deadline = Instant::now() + timeout;
     loop {
         if connection.current_state() == expected {
@@ -12,7 +16,10 @@ async fn wait_for_state(connection: &TransportConnection, expected: ConnectionSt
         }
 
         if Instant::now() >= deadline {
-            panic!("timed out waiting for state {expected:?}, current={:?}", connection.current_state());
+            panic!(
+                "timed out waiting for state {expected:?}, current={:?}",
+                connection.current_state()
+            );
         }
 
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -47,8 +54,18 @@ async fn connection_lifecycle() {
     let client_conn = PhoneCamClient::connect(addr).await.unwrap();
     let mut server_conn = server_task.await.unwrap();
 
-    wait_for_state(&client_conn, ConnectionState::Streaming, Duration::from_secs(2)).await;
-    wait_for_state(&server_conn, ConnectionState::Streaming, Duration::from_secs(2)).await;
+    wait_for_state(
+        &client_conn,
+        ConnectionState::Streaming,
+        Duration::from_secs(2),
+    )
+    .await;
+    wait_for_state(
+        &server_conn,
+        ConnectionState::Streaming,
+        Duration::from_secs(2),
+    )
+    .await;
 
     client_conn
         .sender()
@@ -63,7 +80,12 @@ async fn connection_lifecycle() {
     assert!(matches!(received, Message::Handshake(_)));
 
     drop(client_conn);
-    wait_for_state(&server_conn, ConnectionState::Disconnected, Duration::from_secs(6)).await;
+    wait_for_state(
+        &server_conn,
+        ConnectionState::Disconnected,
+        Duration::from_secs(6),
+    )
+    .await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -75,8 +97,18 @@ async fn throughput_1080p30() {
     let client_conn = PhoneCamClient::connect(addr).await.unwrap();
     let mut server_conn = server_task.await.unwrap();
 
-    wait_for_state(&client_conn, ConnectionState::Streaming, Duration::from_secs(2)).await;
-    wait_for_state(&server_conn, ConnectionState::Streaming, Duration::from_secs(2)).await;
+    wait_for_state(
+        &client_conn,
+        ConnectionState::Streaming,
+        Duration::from_secs(2),
+    )
+    .await;
+    wait_for_state(
+        &server_conn,
+        ConnectionState::Streaming,
+        Duration::from_secs(2),
+    )
+    .await;
 
     let frame_count = 30u64;
     let frame_size = 150 * 1024usize;
@@ -122,7 +154,12 @@ async fn keepalive_timeout() {
     let _silent = tokio::net::TcpStream::connect(addr).await.unwrap();
     let server_conn = accept_task.await.unwrap();
 
-    wait_for_state(&server_conn, ConnectionState::Disconnected, Duration::from_secs(7)).await;
+    wait_for_state(
+        &server_conn,
+        ConnectionState::Disconnected,
+        Duration::from_secs(7),
+    )
+    .await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -150,7 +187,12 @@ async fn latency() {
     });
 
     let mut client_conn = PhoneCamClient::connect(addr).await.unwrap();
-    wait_for_state(&client_conn, ConnectionState::Streaming, Duration::from_secs(2)).await;
+    wait_for_state(
+        &client_conn,
+        ConnectionState::Streaming,
+        Duration::from_secs(2),
+    )
+    .await;
 
     let token = format!("latency:{}", std::process::id());
     let send_at = Instant::now();

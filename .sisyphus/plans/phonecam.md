@@ -1103,7 +1103,7 @@ Parallel Speedup: ~60% faster than sequential (Waves 3 and 4 have 5-6 parallel t
 
 ---
 
-- [ ] 14. Linux + Android WiFi End-to-End Integration
+- [x] 14. Linux + Android WiFi End-to-End Integration
 
   **What to do**:
   - Wire the complete pipeline: Android phone (CameraX → MediaCodec → Rust transport) → WiFi → Linux desktop (Rust transport → H.264 decode → v4l2loopback)

@@ -1,54 +1,48 @@
 use std::sync::{Arc, Mutex};
-use tauri::{State, Manager};
-use phonecam_transport::client::PhoneCamClient;
-use phonecam_discovery::{ServiceBrowser, DiscoveredService};
-use tokio::sync::Mutex as TokioMutex;
+
+use phonecam_discovery::{DiscoveredService, ServiceBrowser};
+use tauri::State;
 
 pub mod convert;
 pub mod decode;
+pub mod pipeline;
 
 pub struct AppState {
-    pub client: Arc<TokioMutex<Option<PhoneCamClient>>>,
+    pub pipeline: pipeline::PipelineManager,
     pub discovered_devices: Arc<Mutex<Vec<DiscoveredService>>>,
 }
 
 #[tauri::command]
-pub async fn connect(state: State<'_, AppState>, ip: String, port: u16) -> Result<(), String> {
-    let mut client_guard = state.client.lock().await;
-    
-    if client_guard.is_some() {
-        return Err("Already connected".into());
-    }
+pub async fn connect(state: State<'_, AppState>, _ip: String, port: u16) -> Result<(), String> {
+    let listen_port = if port == 0 {
+        pipeline::DEFAULT_LISTEN_PORT
+    } else {
+        port
+    };
 
-    let addr = format!("{}:{}", ip, port);
-    let socket_addr: std::net::SocketAddr = addr.parse().map_err(|e| format!("Invalid address: {}", e))?;
-
-    match PhoneCamClient::connect(socket_addr).await {
-        Ok(client) => {
-            *client_guard = Some(client);
-            Ok(())
-        }
-        Err(e) => Err(format!("Failed to connect: {}", e)),
-    }
+    state.pipeline.start(listen_port).await
 }
 
 #[tauri::command]
 pub async fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
-    let mut client_guard = state.client.lock().await;
-    *client_guard = None;
-    Ok(())
+    state.pipeline.stop().await
 }
 
 #[derive(serde::Serialize)]
 pub struct Status {
     pub connected: bool,
+    pub state: String,
+    pub last_error: Option<String>,
 }
 
 #[tauri::command]
 pub async fn get_status(state: State<'_, AppState>) -> Result<Status, String> {
-    let client_guard = state.client.lock().await;
+    let pipeline_status = state.pipeline.status().await;
+
     Ok(Status {
-        connected: client_guard.is_some(),
+        connected: pipeline_status.connected,
+        state: pipeline_status.state,
+        last_error: pipeline_status.last_error,
     })
 }
 
@@ -62,21 +56,25 @@ pub struct DeviceInfo {
 #[tauri::command]
 pub fn get_discovered_devices(state: State<'_, AppState>) -> Vec<DeviceInfo> {
     let devices = state.discovered_devices.lock().unwrap();
-    devices.iter().map(|d| DeviceInfo {
-        name: d.name.clone(),
-        ip: d.ip.to_string(),
-        port: d.port,
-    }).collect()
+    devices
+        .iter()
+        .map(|d| DeviceInfo {
+            name: d.name.clone(),
+            ip: d.ip.to_string(),
+            port: d.port,
+        })
+        .collect()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let discovered_devices = Arc::new(Mutex::new(Vec::new()));
-    let discovered_devices_clone = discovered_devices.clone();
+    let pipeline = pipeline::PipelineManager::new();
 
     tauri::Builder::default()
         .setup(move |app| {
-             tokio::spawn(async move {
+            let discovered_devices_for_discovery = discovered_devices.clone();
+            tokio::spawn(async move {
                 let browser = match ServiceBrowser::new() {
                     Ok(b) => b,
                     Err(e) => {
@@ -84,11 +82,11 @@ pub fn run() {
                         return;
                     }
                 };
-        
+
                 loop {
                     match browser.discover(std::time::Duration::from_secs(3)).await {
                         Ok(services) => {
-                            let mut devices = discovered_devices_clone.lock().unwrap();
+                            let mut devices = discovered_devices_for_discovery.lock().unwrap();
                             *devices = services;
                         }
                         Err(e) => {
@@ -99,13 +97,28 @@ pub fn run() {
                 }
             });
 
+            let pipeline_for_start = pipeline.clone();
+            tokio::spawn(async move {
+                if let Err(err) = pipeline_for_start
+                    .start(pipeline::DEFAULT_LISTEN_PORT)
+                    .await
+                {
+                    log::error!("failed to start streaming pipeline: {err}");
+                }
+            });
+
             app.manage(AppState {
-                client: Arc::new(TokioMutex::new(None)),
-                discovered_devices,
+                pipeline: pipeline.clone(),
+                discovered_devices: discovered_devices.clone(),
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![connect, disconnect, get_status, get_discovered_devices])
+        .invoke_handler(tauri::generate_handler![
+            connect,
+            disconnect,
+            get_status,
+            get_discovered_devices
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
@@ -125,12 +138,15 @@ mod tests {
         };
 
         let services = vec![service];
-        
-        let infos: Vec<DeviceInfo> = services.iter().map(|d| DeviceInfo {
-            name: d.name.clone(),
-            ip: d.ip.to_string(),
-            port: d.port,
-        }).collect();
+
+        let infos: Vec<DeviceInfo> = services
+            .iter()
+            .map(|d| DeviceInfo {
+                name: d.name.clone(),
+                ip: d.ip.to_string(),
+                port: d.port,
+            })
+            .collect();
 
         assert_eq!(infos.len(), 1);
         assert_eq!(infos[0].name, "PhoneCam Test");

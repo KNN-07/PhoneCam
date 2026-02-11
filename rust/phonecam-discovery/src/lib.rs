@@ -105,7 +105,10 @@ impl ServiceBrowser {
         Ok(Self { daemon })
     }
 
-    pub async fn discover(&self, timeout: Duration) -> Result<Vec<DiscoveredService>, DiscoveryError> {
+    pub async fn discover(
+        &self,
+        timeout: Duration,
+    ) -> Result<Vec<DiscoveredService>, DiscoveryError> {
         let receiver = self.daemon.browse(SERVICE_TYPE)?;
         let mut discovered = HashSet::new();
         let deadline = std::time::Instant::now() + timeout;
@@ -175,9 +178,9 @@ pub fn format_qr_code_uri(ip: IpAddr, port: u16, device_name: &str) -> String {
 }
 
 pub fn parse_qr_code_uri(uri: &str) -> Result<QrCodeConnectionInfo, DiscoveryError> {
-    let payload = uri
-        .strip_prefix(QR_SCHEME_PREFIX)
-        .ok_or_else(|| DiscoveryError::InvalidQrCodeUri("missing phonecam:// scheme".to_string()))?;
+    let payload = uri.strip_prefix(QR_SCHEME_PREFIX).ok_or_else(|| {
+        DiscoveryError::InvalidQrCodeUri("missing phonecam:// scheme".to_string())
+    })?;
 
     let (authority, query) = payload.split_once('?').ok_or_else(|| {
         DiscoveryError::InvalidQrCodeUri("missing ?name=DEVICE_NAME query parameter".to_string())

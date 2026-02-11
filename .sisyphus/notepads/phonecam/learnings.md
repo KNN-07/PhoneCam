@@ -52,3 +52,14 @@
 - AVFoundation iOS: Use AVCaptureVideoDataOutput with dedicated serial queue for frame capture, AVCaptureSession.Preset for resolution
 - VideoToolbox: Create VTCompressionSession with kVTCompressionPropertyKey_RealTime=true and kVTCompressionPropertyKey_AllowFrameReordering=false for low latency
 - Rust FFI pattern: Swift/Kotlin pass raw frame buffers to phonecam_send_video_frame C FFI, Rust wraps in protocol::VideoFrame and sends via transport
+
+## 2026-02-11 (Wave 4 - E2E Integration)
+
+- Tauri pipeline manager pattern: Spawn long-running async worker with `tokio::spawn`, manage via Arc<TokioMutex<Runtime>> holding shutdown channel + JoinHandle
+- Use `watch::channel<PipelineStatus>` for observable state that UI can subscribe to, with state transitions driven by pipeline lifecycle events
+- Pipeline worker lifecycle: mDNS advertise → TCP bind → accept (with shutdown select) → stream loop → disconnect → cleanup
+- Main streaming select loop multiplexes: shutdown signal, connection state monitoring, message receive, enabling clean cancellation at any point
+- Lazy converter initialization: Create Nv12ToYuyvConverter only when first frame arrives and dimensions are known, recreate on resolution change
+- v4l2 device format setting: Call `device.set_format(width, height, PixelFormat::YUYV)` when resolution changes, before writing frames
+- Environment variable `PHONECAM_V4L2_DEVICE` allows manual override of default v4l2 device selection for testing/debugging
+- Error handling strategy: Decode/convert failures log warnings but continue (allow pipeline to recover), device failures return Err and exit stream loop

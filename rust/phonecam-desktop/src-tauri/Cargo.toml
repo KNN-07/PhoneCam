@@ -22,3 +22,4 @@ ffmpeg-next = "7.0"
 phonecam-transport = { path = "../../phonecam-transport" }
 phonecam-discovery = { path = "../../phonecam-discovery" }
 phonecam-protocol = { path = "../../phonecam-protocol" }
+phonecam-driver-linux = { path = "../../phonecam-driver-linux" }
