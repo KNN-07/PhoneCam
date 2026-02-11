@@ -2,33 +2,169 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  test:
-    name: Rust CI
-    runs-on: ubuntu-latest
+  rust-checks:
+    name: Rust checks (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            cargo_flags: --workspace
+          - os: macos-latest
+            cargo_flags: --workspace --exclude phonecam-driver-linux --exclude phonecam-desktop
+          - os: windows-latest
+            cargo_flags: --workspace --exclude phonecam-driver-linux --exclude phonecam-desktop
+
     steps:
       - uses: actions/checkout@v4
-      
+
+      - name: Install Linux system dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            v4l2loopback-dkms \
+            v4l2loopback-utils \
+            ffmpeg \
+            libavcodec-dev \
+            libavdevice-dev \
+            libavfilter-dev \
+            libavformat-dev \
+            libavutil-dev \
+            libswscale-dev \
+            libv4l-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            pkg-config
+          sudo apt-get install -y libwebkit2gtk-4.1-dev || sudo apt-get install -y libwebkit2gtk-4.0-dev
+
+      - name: Setup Xcode
+        if: matrix.os == 'macos-latest'
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Setup Visual Studio build tools
+        if: matrix.os == 'windows-latest'
+        uses: ilammy/msvc-dev-cmd@v1
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
 
-      - name: Rust Cache
+      - name: Rust cache
         uses: Swatinem/rust-cache@v2
 
       - name: Check format
         run: cargo fmt --workspace --check
 
       - name: Clippy
-        run: cargo clippy --workspace -- -D warnings
+        run: cargo clippy ${{ matrix.cargo_flags }} -- -D warnings
 
       - name: Run tests
-        run: cargo test --workspace
+        run: cargo test ${{ matrix.cargo_flags }}
+
+      - name: Build Windows CMake driver
+        if: matrix.os == 'windows-latest'
+        run: |
+          cmake -S windows/PhoneCamDriver -B build/windows-driver -G "Visual Studio 17 2022" -A x64
+          cmake --build build/windows-driver --config Release
+
+  ios-build:
+    name: iOS and CMIO builds
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Build iOS app
+        run: |
+          xcodebuild \
+            -project ios/PhoneCam/PhoneCam.xcodeproj \
+            -scheme PhoneCam \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Build macOS CMIO extension
+        run: |
+          xcodebuild \
+            -project apple/PhoneCamDriver/PhoneCamDriver.xcodeproj \
+            -target PhoneCamDriver \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+  android-build:
+    name: Android build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Build and test Android app
+        run: ./gradlew --no-daemon testDebugUnitTest assembleDebug
+
+  coverage:
+    name: Rust coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ffmpeg \
+            libavcodec-dev \
+            libavdevice-dev \
+            libavfilter-dev \
+            libavformat-dev \
+            libavutil-dev \
+            libswscale-dev \
+            libv4l-dev \
+            pkg-config
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-tarpaulin
+        run: cargo install cargo-tarpaulin --locked
+
+      - name: Generate coverage report
+        run: cargo tarpaulin --workspace --exclude phonecam-desktop --exclude phonecam-driver-linux --timeout 120 --out Xml
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-coverage-xml
+          path: cobertura.xml
