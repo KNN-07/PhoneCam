@@ -7,6 +7,11 @@
 
 // Raw frame path ABI (shared with Android):
 void phonecam_send_video_frame(const uint8_t *data, size_t len, uint64_t pts, bool is_keyframe);
+bool phonecam_transport_init(const char *host, uint16_t port);
+void phonecam_transport_shutdown(void);
+bool phonecam_transport_is_connected(void);
+void phonecam_set_video_dimensions(uint16_t width, uint16_t height);
+char *phonecam_parse_qr_code_uri(const char *uri);
 
 // Lightweight FFI test helpers used during bootstrap.
 char *phonecam_ffi_test_message(void);

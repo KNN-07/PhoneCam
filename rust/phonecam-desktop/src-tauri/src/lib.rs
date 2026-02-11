@@ -1,6 +1,11 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    net::IpAddr,
+    sync::{Arc, Mutex},
+};
 
-use phonecam_discovery::{DiscoveredService, ServiceBrowser};
+use local_ip_address::list_afinet_netifas;
+use phonecam_discovery::{format_qr_code_uri, DiscoveredService, ServiceBrowser};
+use qrcode::{render::svg, QrCode};
 use tauri::State;
 
 pub mod convert;
@@ -10,6 +15,51 @@ pub mod pipeline;
 pub struct AppState {
     pub pipeline: pipeline::PipelineManager,
     pub discovered_devices: Arc<Mutex<Vec<DiscoveredService>>>,
+}
+
+const DEFAULT_QR_DEVICE_NAME: &str = "PhoneCam Desktop";
+
+fn desktop_device_name() -> String {
+    std::env::var("HOSTNAME")
+        .or_else(|_| std::env::var("COMPUTERNAME"))
+        .map(|value| value.trim().to_string())
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| DEFAULT_QR_DEVICE_NAME.to_string())
+}
+
+fn local_interface_ips() -> Result<Vec<IpAddr>, String> {
+    let mut ips: Vec<IpAddr> = list_afinet_netifas()
+        .map_err(|err| format!("failed to list local network interfaces: {err}"))?
+        .into_iter()
+        .map(|(_, ip)| ip)
+        .filter(|ip| !ip.is_loopback())
+        .collect();
+
+    ips.sort_unstable_by(|a, b| {
+        let a_family = if a.is_ipv4() { 0 } else { 1 };
+        let b_family = if b.is_ipv4() { 0 } else { 1 };
+        a_family
+            .cmp(&b_family)
+            .then_with(|| a.to_string().cmp(&b.to_string()))
+    });
+    ips.dedup();
+
+    if ips.is_empty() {
+        return Err("no non-loopback local network interface detected".to_string());
+    }
+
+    Ok(ips)
+}
+
+fn qr_connection_uris() -> Result<Vec<String>, String> {
+    let device_name = desktop_device_name();
+    let uris = local_interface_ips()?
+        .into_iter()
+        .map(|ip| format_qr_code_uri(ip, pipeline::DEFAULT_LISTEN_PORT, &device_name))
+        .collect();
+
+    Ok(uris)
 }
 
 #[tauri::command]
@@ -66,6 +116,27 @@ pub fn get_discovered_devices(state: State<'_, AppState>) -> Vec<DeviceInfo> {
         .collect()
 }
 
+#[tauri::command]
+pub fn generate_qr_code() -> Result<String, String> {
+    let uris = qr_connection_uris()?;
+    let primary_uri = uris
+        .first()
+        .ok_or_else(|| "no QR connection URI available".to_string())?;
+
+    let qr_code = QrCode::new(primary_uri.as_bytes())
+        .map_err(|err| format!("failed to generate QR code: {err}"))?;
+
+    Ok(qr_code
+        .render::<svg::Color>()
+        .min_dimensions(240, 240)
+        .build())
+}
+
+#[tauri::command]
+pub fn get_qr_connection_uris() -> Result<Vec<String>, String> {
+    qr_connection_uris()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let discovered_devices = Arc::new(Mutex::new(Vec::new()));
@@ -117,7 +188,9 @@ pub fn run() {
             connect,
             disconnect,
             get_status,
-            get_discovered_devices
+            get_discovered_devices,
+            generate_qr_code,
+            get_qr_connection_uris
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -10,6 +10,7 @@
 		A1B2C3D4E5F6010000000001 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6020000000002 /* ContentView.swift */; };
 		A1B2C3D4E5F6010000000002 /* PhoneCamApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6020000000003 /* PhoneCamApp.swift */; };
 		A1B2C3D4E5F6010000000003 /* phonecam_mobile_core.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6020000000006 /* phonecam_mobile_core.swift */; };
+		A1B2C3D4E5F6010000000004 /* QRScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6020000000009 /* QRScannerView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -21,6 +22,7 @@
 		A1B2C3D4E5F6020000000006 /* phonecam_mobile_core.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = phonecam_mobile_core.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F6020000000007 /* phonecam_mobile_coreFFI.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = phonecam_mobile_coreFFI.h; sourceTree = "<group>"; };
 		A1B2C3D4E5F6020000000008 /* phonecam_mobile_coreFFI.modulemap */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.module-map; path = phonecam_mobile_coreFFI.modulemap; sourceTree = "<group>"; };
+		A1B2C3D4E5F6020000000009 /* QRScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRScannerView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -54,6 +56,7 @@
 			isa = PBXGroup;
 			children = (
 				A1B2C3D4E5F6020000000002 /* ContentView.swift */,
+				A1B2C3D4E5F6020000000009 /* QRScannerView.swift */,
 				A1B2C3D4E5F6020000000003 /* PhoneCamApp.swift */,
 				A1B2C3D4E5F6020000000004 /* Info.plist */,
 				A1B2C3D4E5F6020000000005 /* PhoneCam-Bridging-Header.h */,
@@ -141,6 +144,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A1B2C3D4E5F6010000000001 /* ContentView.swift in Sources */,
+				A1B2C3D4E5F6010000000004 /* QRScannerView.swift in Sources */,
 				A1B2C3D4E5F6010000000002 /* PhoneCamApp.swift in Sources */,
 				A1B2C3D4E5F6010000000003 /* phonecam_mobile_core.swift in Sources */,
 			);

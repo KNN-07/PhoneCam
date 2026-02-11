@@ -5,6 +5,7 @@ import UIKit
 struct ContentView: View {
     @ObservedObject var cameraController: CameraController
     @ObservedObject var streamManager: StreamManager
+    @State private var isShowingQrScanner = false
 
     var body: some View {
         ZStack {
@@ -50,6 +51,20 @@ struct ContentView: View {
                         }
                     }
                     .pickerStyle(.segmented)
+
+                    Button {
+                        isShowingQrScanner = true
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "qrcode.viewfinder")
+                            Text("Scan QR Code")
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(.white)
+                        .padding(.vertical, 10)
+                        .frame(maxWidth: .infinity)
+                        .background(Color.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
                 }
                 .padding(16)
                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -62,6 +77,11 @@ struct ContentView: View {
         }
         .onDisappear {
             streamManager.stopStreaming()
+        }
+        .sheet(isPresented: $isShowingQrScanner) {
+            QRScannerView(onScannedUri: { scannedUri in
+                _ = streamManager.connectUsingQrUri(scannedUri)
+            })
         }
     }
 

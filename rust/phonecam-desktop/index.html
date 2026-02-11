@@ -49,6 +49,26 @@
           </div>
         </section>
 
+        <section class="qr-connect-section">
+          <h2>QR Code Fallback</h2>
+          <div class="action-group" style="margin-bottom: 12px;">
+            <button id="show-qr-btn" class="btn primary-btn">Show QR Code</button>
+            <button id="hide-qr-btn" class="btn secondary-btn" hidden>Hide QR Code</button>
+          </div>
+
+          <div id="qr-code-panel" class="device-list-container" hidden>
+            <div
+              id="qr-code-image"
+              style="display: flex; justify-content: center; align-items: center; margin-bottom: 12px;"
+            ></div>
+            <div>
+              <strong>Connection URI</strong>
+              <p id="qr-code-uri" style="word-break: break-all; margin: 6px 0 10px;"></p>
+              <ul id="qr-code-uri-list" class="device-list" style="max-height: 110px; overflow: auto;"></ul>
+            </div>
+          </div>
+        </section>
+
         <section class="manual-connect-section">
           <h2>Manual Connection</h2>
           <div class="input-group">

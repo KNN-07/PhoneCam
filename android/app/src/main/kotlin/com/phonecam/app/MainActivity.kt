@@ -1,9 +1,11 @@
 package com.phonecam.app
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
+import android.widget.Button
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -13,6 +15,7 @@ import androidx.core.content.ContextCompat
 class MainActivity : AppCompatActivity() {
     private lateinit var previewView: PreviewView
     private lateinit var statusTextView: TextView
+    private lateinit var scanQrButton: Button
     private lateinit var cameraController: CameraController
     private lateinit var streamManager: StreamManager
 
@@ -25,12 +28,46 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+    private val qrScannerLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode != RESULT_OK) {
+                return@registerForActivityResult
+            }
+
+            val scannedUri = result.data?.getStringExtra(QRScannerActivity.EXTRA_QR_URI)
+            if (scannedUri.isNullOrBlank()) {
+                updateStatus("QR scan did not return a PhoneCam URI")
+                return@registerForActivityResult
+            }
+
+            val qrConnection = StreamManager.parseQrConnectionUri(scannedUri)
+            if (qrConnection == null) {
+                updateStatus("Scanned QR code is not a valid PhoneCam URI")
+                return@registerForActivityResult
+            }
+
+            val connected = streamManager.reconnect(qrConnection.host, qrConnection.port)
+            if (connected) {
+                updateStatus(
+                    "Connected to ${qrConnection.deviceName} (${qrConnection.host}:${qrConnection.port}) via QR",
+                )
+            } else {
+                updateStatus(
+                    "Unable to connect to ${qrConnection.deviceName} (${qrConnection.host}:${qrConnection.port})",
+                )
+            }
+        }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
         previewView = findViewById(R.id.cameraPreviewView)
         statusTextView = findViewById(R.id.statusTextView)
+        scanQrButton = findViewById(R.id.scanQrButton)
+        scanQrButton.setOnClickListener {
+            qrScannerLauncher.launch(Intent(this, QRScannerActivity::class.java))
+        }
 
         val streamConfig =
             StreamConfig(

@@ -158,16 +158,63 @@ async function disconnect() {
   }
 }
 
+async function showQrCode() {
+  const panelEl = document.getElementById("qr-code-panel");
+  const showBtn = document.getElementById("show-qr-btn");
+  const hideBtn = document.getElementById("hide-qr-btn");
+  const qrImageEl = document.getElementById("qr-code-image");
+  const qrUriEl = document.getElementById("qr-code-uri");
+  const qrUriListEl = document.getElementById("qr-code-uri-list");
+
+  try {
+    const [qrSvg, uris] = await Promise.all([
+      invoke("generate_qr_code"),
+      invoke("get_qr_connection_uris")
+    ]);
+
+    qrImageEl.innerHTML = qrSvg;
+    qrUriEl.textContent = uris[0] || "No QR URI available";
+
+    qrUriListEl.innerHTML = "";
+    uris.forEach((uri, index) => {
+      const li = document.createElement("li");
+      li.className = "device-item";
+      li.style.cursor = "text";
+      li.textContent = index === 0 ? `${uri} (primary interface)` : uri;
+      qrUriListEl.appendChild(li);
+    });
+
+    panelEl.hidden = false;
+    showBtn.hidden = true;
+    hideBtn.hidden = false;
+  } catch (e) {
+    alert("QR code generation failed: " + e);
+  }
+}
+
+function hideQrCode() {
+  const panelEl = document.getElementById("qr-code-panel");
+  const showBtn = document.getElementById("show-qr-btn");
+  const hideBtn = document.getElementById("hide-qr-btn");
+  panelEl.hidden = true;
+  showBtn.hidden = false;
+  hideBtn.hidden = true;
+}
+
 window.addEventListener("DOMContentLoaded", () => {
   loadSettings();
 
   const connectBtn = document.getElementById("connect-btn");
   const disconnectBtn = document.getElementById("disconnect-btn");
+  const showQrBtn = document.getElementById("show-qr-btn");
+  const hideQrBtn = document.getElementById("hide-qr-btn");
   const resolutionSelect = document.getElementById("resolution-select");
   const fpsSelect = document.getElementById("fps-select");
   
   if (connectBtn) connectBtn.addEventListener("click", () => connect());
   if (disconnectBtn) disconnectBtn.addEventListener("click", disconnect);
+  if (showQrBtn) showQrBtn.addEventListener("click", showQrCode);
+  if (hideQrBtn) hideQrBtn.addEventListener("click", hideQrCode);
   
   if (resolutionSelect) resolutionSelect.addEventListener("change", saveSettings);
   if (fpsSelect) fpsSelect.addEventListener("change", saveSettings);

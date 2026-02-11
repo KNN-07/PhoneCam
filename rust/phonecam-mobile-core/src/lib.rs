@@ -4,8 +4,9 @@ use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::sync::{Mutex, OnceLock};
 
+use phonecam_discovery::parse_qr_code_uri;
 use phonecam_protocol::{Message, VideoFrame};
-use phonecam_transport::{PhoneCamClient, TransportConnection};
+use phonecam_transport::{ConnectionState, PhoneCamClient, TransportConnection};
 use tokio::runtime::{Builder, Runtime};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -237,8 +238,50 @@ pub extern "C" fn phonecam_transport_shutdown() {
 }
 
 #[no_mangle]
+pub extern "C" fn phonecam_transport_is_connected() -> bool {
+    transport_client_slot()
+        .lock()
+        .ok()
+        .and_then(|slot| {
+            slot.as_ref().map(|client| {
+                matches!(
+                    client.connection.current_state(),
+                    ConnectionState::Handshaking | ConnectionState::Streaming
+                )
+            })
+        })
+        .unwrap_or(false)
+}
+
+#[no_mangle]
 pub extern "C" fn phonecam_set_video_resolution(width: u16, height: u16) {
     set_video_resolution(width, height);
+}
+
+#[no_mangle]
+pub extern "C" fn phonecam_set_video_dimensions(width: u16, height: u16) {
+    phonecam_set_video_resolution(width, height);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn phonecam_parse_qr_code_uri(uri: *const c_char) -> *mut c_char {
+    if uri.is_null() {
+        return std::ptr::null_mut();
+    }
+
+    let uri = match unsafe { CStr::from_ptr(uri) }.to_str() {
+        Ok(uri) => uri,
+        Err(_) => return std::ptr::null_mut(),
+    };
+
+    let parsed = match parse_qr_code_uri(uri) {
+        Ok(parsed) => parsed,
+        Err(_) => return std::ptr::null_mut(),
+    };
+
+    CString::new(format!("{}|{}|{}", parsed.ip, parsed.port, parsed.name))
+        .map(CString::into_raw)
+        .unwrap_or(std::ptr::null_mut())
 }
 
 #[no_mangle]
@@ -248,7 +291,6 @@ pub extern "C" fn phonecam_ffi_test_message() -> *mut c_char {
         .into_raw()
 }
 
-/// Frees a C string allocated by `phonecam_ffi_test_message`.
 #[no_mangle]
 pub unsafe extern "C" fn phonecam_string_free(ptr: *mut c_char) {
     if ptr.is_null() {
@@ -279,7 +321,7 @@ uniffi::include_scaffolding!("phonecam");
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::ffi::CStr;
+    use std::ffi::{CStr, CString};
     use std::sync::{Mutex, OnceLock};
 
     static TEST_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
@@ -366,5 +408,34 @@ mod tests {
         let config = current_config();
         assert_eq!(config.video_width, 1920);
         assert_eq!(config.video_height, 1080);
+    }
+
+    #[test]
+    fn parse_qr_uri_roundtrip_through_c_ffi() {
+        let _lock = test_lock();
+        let uri = CString::new("phonecam://192.168.0.42:7878?name=Desktop").unwrap();
+
+        let ptr = unsafe { phonecam_parse_qr_code_uri(uri.as_ptr()) };
+        assert!(!ptr.is_null(), "expected valid pointer for valid QR URI");
+
+        let payload = unsafe { CStr::from_ptr(ptr) }
+            .to_str()
+            .expect("parsed QR payload must be valid UTF-8")
+            .to_string();
+
+        assert_eq!(payload, "192.168.0.42|7878|Desktop");
+
+        unsafe {
+            phonecam_string_free(ptr);
+        }
+    }
+
+    #[test]
+    fn parse_qr_uri_rejects_invalid_payload() {
+        let _lock = test_lock();
+        let uri = CString::new("not-a-phonecam-uri").unwrap();
+
+        let ptr = unsafe { phonecam_parse_qr_code_uri(uri.as_ptr()) };
+        assert!(ptr.is_null(), "expected null pointer for invalid QR URI");
     }
 }

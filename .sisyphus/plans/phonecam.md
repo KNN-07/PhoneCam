@@ -1399,7 +1399,7 @@ Parallel Speedup: ~60% faster than sequential (Waves 3 and 4 have 5-6 parallel t
 
 ---
 
-- [ ] 19. mDNS Discovery + QR Code Fallback Integration
+- [x] 19. mDNS Discovery + QR Code Fallback Integration
 
   **What to do**:
   - Integrate `phonecam-discovery` into Tauri desktop (publish service on startup)

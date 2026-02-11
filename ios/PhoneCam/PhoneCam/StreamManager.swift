@@ -13,6 +13,12 @@ final class StreamManager: ObservableObject {
     private var endpointHost: String = "127.0.0.1"
     private var endpointPort: UInt16 = 7878
 
+    private struct QrConnectionInfo {
+        let host: String
+        let port: UInt16
+        let name: String
+    }
+
     init(cameraController: CameraController) {
         self.cameraController = cameraController
     }
@@ -126,6 +132,33 @@ final class StreamManager: ObservableObject {
         }
     }
 
+    @discardableResult
+    func connectUsingQrUri(_ uri: String) -> Bool {
+        guard let qrInfo = parseQrCodeUri(uri) else {
+            DispatchQueue.main.async {
+                self.statusText = "Invalid PhoneCam QR code"
+            }
+            return false
+        }
+
+        endpointHost = qrInfo.host
+        endpointPort = qrInfo.port
+
+        if isStreaming {
+            phonecam_transport_shutdown()
+            let connected = initializeTransport()
+            DispatchQueue.main.async {
+                self.statusText = connected
+                    ? "Connected to \(qrInfo.name) (\(qrInfo.host):\(qrInfo.port))"
+                    : "Unable to connect to \(qrInfo.name) (\(qrInfo.host):\(qrInfo.port))"
+            }
+            return connected
+        }
+
+        startStreaming(host: qrInfo.host, port: qrInfo.port)
+        return true
+    }
+
     private func configureEncoder(for resolution: CaptureResolution) {
         let size = resolution.dimensions
 
@@ -172,7 +205,8 @@ final class StreamManager: ObservableObject {
         phonecam_set_video_dimensions(dimensions.width, dimensions.height)
     }
 
-    private func initializeTransport() {
+    @discardableResult
+    private func initializeTransport() -> Bool {
         let initialized = endpointHost.withCString { hostCString in
             phonecam_transport_init(hostCString, endpointPort)
         }
@@ -187,6 +221,46 @@ final class StreamManager: ObservableObject {
                 self.statusText = "Unable to connect to \(self.endpointHost):\(self.endpointPort)"
             }
         }
+
+        return connected
+    }
+
+    private func parseQrCodeUri(_ uri: String) -> QrConnectionInfo? {
+        let trimmed = uri.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return nil
+        }
+
+        let parsedPtr: UnsafeMutablePointer<CChar>? = trimmed.withCString { rawUri in
+            phonecam_parse_qr_code_uri(rawUri)
+        }
+
+        guard let parsedPtr else {
+            return nil
+        }
+
+        defer {
+            phonecam_string_free(parsedPtr)
+        }
+
+        let payload = String(cString: parsedPtr)
+        let parts = payload.split(separator: "|", maxSplits: 2, omittingEmptySubsequences: false)
+        guard parts.count == 3 else {
+            return nil
+        }
+
+        let host = String(parts[0]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let port = UInt16(String(parts[1]))
+        let name = String(parts[2]).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !host.isEmpty, let port else {
+            return nil
+        }
+
+        return QrConnectionInfo(
+            host: host,
+            port: port,
+            name: name.isEmpty ? "PhoneCam Desktop" : name
+        )
     }
 
     private func startConnectionStatusPolling() {

@@ -6,6 +6,7 @@ import androidx.camera.core.ImageProxy
 import com.sun.jna.Library
 import com.sun.jna.Native
 import com.sun.jna.NativeLong
+import com.sun.jna.Pointer
 
 enum class StreamResolution(
     val width: Int,
@@ -25,6 +26,12 @@ data class StreamConfig(
     val targetSize: Size
         get() = Size(resolution.width, resolution.height)
 }
+
+data class QrConnectionInfo(
+    val host: String,
+    val port: Int,
+    val deviceName: String,
+)
 
 class StreamManager(
     private val config: StreamConfig,
@@ -74,6 +81,24 @@ class StreamManager(
         onStatus("Streaming stopped")
     }
 
+    fun reconnect(
+        host: String,
+        port: Int,
+    ): Boolean {
+        if (host.isBlank()) {
+            return false
+        }
+
+        val safePort = port.coerceIn(1, 65535)
+        val connected = RustBridge.reconnectTransport(host.trim(), safePort)
+        if (connected) {
+            onStatus("Connected to transport ${host.trim()}:$safePort")
+        } else {
+            onStatus("Unable to connect to transport ${host.trim()}:$safePort")
+        }
+        return connected
+    }
+
     fun handleCameraFrame(imageProxy: ImageProxy) {
         try {
             if (!started) {
@@ -112,6 +137,10 @@ class StreamManager(
             pts: Long,
             isKeyframe: Boolean,
         )
+
+        fun phonecam_parse_qr_code_uri(uri: String): Pointer?
+
+        fun phonecam_string_free(ptr: Pointer?)
     }
 
     private object RustBridge {
@@ -140,6 +169,47 @@ class StreamManager(
                 lib.phonecam_transport_shutdown()
             }.onFailure {
                 Log.w(TAG, "Rust transport shutdown failed", it)
+            }
+        }
+
+        fun reconnectTransport(
+            host: String,
+            port: Int,
+        ): Boolean {
+            shutdownTransport()
+            return initializeTransport(host, port)
+        }
+
+        fun parseQrConnectionUri(uri: String): QrConnectionInfo? {
+            val ptr =
+                runCatching {
+                    lib.phonecam_parse_qr_code_uri(uri)
+                }.onFailure {
+                    Log.w(TAG, "Rust QR URI parse call failed", it)
+                }.getOrNull() ?: return null
+
+            return try {
+                val payload = ptr.getString(0)
+                val parts = payload.split('|', limit = 3)
+                if (parts.size != 3) {
+                    null
+                } else {
+                    val host = parts[0].trim()
+                    val port = parts[1].toIntOrNull()?.coerceIn(1, 65535)
+                    val deviceName = parts[2].trim().ifBlank { "PhoneCam Desktop" }
+
+                    if (host.isBlank() || port == null) {
+                        null
+                    } else {
+                        QrConnectionInfo(host = host, port = port, deviceName = deviceName)
+                    }
+                }
+            } finally {
+                runCatching {
+                    lib.phonecam_string_free(ptr)
+                }.onFailure {
+                    Log.w(TAG, "Failed to free Rust QR parse response", it)
+                }
             }
         }
 
@@ -178,5 +248,7 @@ class StreamManager(
 
     companion object {
         private const val TAG = "StreamManager"
+
+        fun parseQrConnectionUri(uri: String): QrConnectionInfo? = RustBridge.parseQrConnectionUri(uri)
     }
 }
