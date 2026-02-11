@@ -9,10 +9,10 @@ use phonecam_protocol::{CameraControl, Message};
 use qrcode::{render::svg, QrCode};
 use tauri::State;
 
+pub mod adb;
 pub mod convert;
 pub mod decode;
 pub mod pipeline;
-pub mod adb;
 
 #[cfg(target_os = "macos")]
 pub mod driver_macos;

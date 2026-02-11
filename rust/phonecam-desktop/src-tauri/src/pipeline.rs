@@ -151,7 +151,13 @@ impl PipelineManager {
         runtime.usb_forward = usb_forward;
         runtime.shutdown_tx = Some(shutdown_tx);
         runtime.worker = Some(tokio::spawn(async move {
-            run_pipeline(listen_port, status_tx, shutdown_rx, active_connection_sender).await;
+            run_pipeline(
+                listen_port,
+                status_tx,
+                shutdown_rx,
+                active_connection_sender,
+            )
+            .await;
         }));
 
         Ok(())
@@ -226,7 +232,9 @@ impl PipelineManager {
         .ok_or_else(|| "no active phone connection for camera switch".to_string())?;
 
         sender
-            .send(Message::CameraControl(CameraControl::SwitchCamera { front }))
+            .send(Message::CameraControl(CameraControl::SwitchCamera {
+                front,
+            }))
             .await
             .map_err(|_| "failed to send camera switch command: connection closed".to_string())
     }

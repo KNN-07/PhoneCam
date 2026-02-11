@@ -1,7 +1,6 @@
 use std::{
     collections::BTreeMap,
-    env,
-    fmt,
+    env, fmt,
     path::{Path, PathBuf},
     process::Stdio,
     sync::Arc,
@@ -97,7 +96,9 @@ pub struct AdbDeviceEvent {
 
 #[derive(Debug)]
 pub enum AdbError {
-    NotFound { searched: Vec<PathBuf> },
+    NotFound {
+        searched: Vec<PathBuf>,
+    },
     Io(String),
     Utf8(String),
     Parse(String),
@@ -140,7 +141,10 @@ impl fmt::Display for AdbError {
             Self::NoDevices => write!(f, "no Android devices detected"),
             Self::UnauthorizedDevices(serials) => {
                 if serials.is_empty() {
-                    write!(f, "device is unauthorized; allow USB debugging on the phone")
+                    write!(
+                        f,
+                        "device is unauthorized; allow USB debugging on the phone"
+                    )
                 } else {
                     write!(
                         f,
@@ -166,11 +170,7 @@ impl fmt::Display for AdbError {
                 stdout,
                 stderr,
             } => {
-                write!(
-                    f,
-                    "ADB command failed: `{command}` (exit: {:?})",
-                    code
-                )?;
+                write!(f, "ADB command failed: `{command}` (exit: {:?})", code)?;
                 if !stderr.trim().is_empty() {
                     write!(f, "; stderr: {}", stderr.trim())?;
                 }
@@ -368,14 +368,19 @@ impl AdbManager {
         }
 
         if let Some(requested_serial) = serial.map(str::trim).filter(|value| !value.is_empty()) {
-            let Some(device) = devices.iter().find(|device| device.serial == requested_serial) else {
+            let Some(device) = devices
+                .iter()
+                .find(|device| device.serial == requested_serial)
+            else {
                 return Err(AdbError::DeviceNotFound(requested_serial.to_string()));
             };
 
             return if device.is_ready() {
                 Ok(requested_serial.to_string())
             } else if matches!(device.state, AdbDeviceState::Unauthorized) {
-                Err(AdbError::UnauthorizedDevices(vec![requested_serial.to_string()]))
+                Err(AdbError::UnauthorizedDevices(vec![
+                    requested_serial.to_string()
+                ]))
             } else {
                 Err(AdbError::DeviceUnavailable {
                     serial: requested_serial.to_string(),
@@ -447,7 +452,9 @@ impl AdbManager {
             .kill_on_drop(true)
             .output()
             .await
-            .map_err(|error| AdbError::Io(format!("failed to execute {}: {error}", adb_path.display())))?;
+            .map_err(|error| {
+                AdbError::Io(format!("failed to execute {}: {error}", adb_path.display()))
+            })?;
 
         let stdout = String::from_utf8(output.stdout)
             .map_err(|error| AdbError::Utf8(format!("invalid UTF-8 in adb stdout: {error}")))?;
@@ -595,7 +602,10 @@ async fn discover_adb_binary() -> Result<PathBuf, AdbError> {
     }
 
     for candidate in candidates {
-        if searched.iter().any(|searched_path| searched_path == &candidate) {
+        if searched
+            .iter()
+            .any(|searched_path| searched_path == &candidate)
+        {
             continue;
         }
 
