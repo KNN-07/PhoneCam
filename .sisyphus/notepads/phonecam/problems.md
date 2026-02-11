@@ -25,3 +25,19 @@
 - Android SDK required for TODO 12
 - macOS + Xcode required for TODO 13
 - These tasks may need manual implementation or platform-specific CI/verification
+
+## 2026-02-11 (Wave 3 - Platform-Specific Blockers)
+
+### TODO 10: macOS CMIO Camera Extension
+- **BLOCKED**: Requires macOS development environment with Xcode
+- Implementation ready (Swift code structure documented in plan)
+- Manual verification needed: System Extension signing + SIP
+- **Recommendation**: Defer to manual implementation on macOS machine OR mark as out of scope for CI
+
+### TODO 11: Windows Virtual Camera Driver
+- **BLOCKED**: Requires Windows development environment with MSVC/Windows SDK
+- Implementation ready (C++ COM DLL structure documented in plan)
+- Manual verification needed: Test signing mode
+- **Recommendation**: Defer to manual implementation on Windows machine OR mark as out of scope for CI
+
+**Decision**: Mark TODOs 10, 11 as environment-blocked, proceed with Wave 4 E2E integration using Linux desktop + Android/iOS mobile (WiFi only)
