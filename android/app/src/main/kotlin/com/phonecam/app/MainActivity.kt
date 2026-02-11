@@ -15,6 +15,7 @@ import androidx.core.content.ContextCompat
 class MainActivity : AppCompatActivity() {
     private lateinit var previewView: PreviewView
     private lateinit var statusTextView: TextView
+    private lateinit var cameraStateTextView: TextView
     private lateinit var scanQrButton: Button
     private lateinit var cameraController: CameraController
     private lateinit var streamManager: StreamManager
@@ -64,6 +65,7 @@ class MainActivity : AppCompatActivity() {
 
         previewView = findViewById(R.id.cameraPreviewView)
         statusTextView = findViewById(R.id.statusTextView)
+        cameraStateTextView = findViewById(R.id.cameraStateTextView)
         scanQrButton = findViewById(R.id.scanQrButton)
         scanQrButton.setOnClickListener {
             qrScannerLauncher.launch(Intent(this, QRScannerActivity::class.java))
@@ -92,9 +94,11 @@ class MainActivity : AppCompatActivity() {
             )
 
         streamManager = StreamManager(streamConfig, ::updateStatus)
+        streamManager.setOnCameraStateChanged(::updateCameraState)
         cameraController = CameraController(applicationContext, this)
 
         updateStatus("Ready. Waiting for camera permission…")
+        updateCameraState(false)
         ensureCameraPermissionAndStart()
     }
 
@@ -129,6 +133,8 @@ class MainActivity : AppCompatActivity() {
                     updateStatus("Camera startup failed: ${it.message ?: "unknown error"}")
                 },
             )
+            streamManager.registerCameraPipeline(cameraController, previewView)
+            updateCameraState(cameraController.isUsingFrontCamera())
             val target = streamManager.targetResolution()
             updateStatus("Camera preview active (${target.width}x${target.height})")
         }.onFailure {
@@ -147,6 +153,12 @@ class MainActivity : AppCompatActivity() {
         Log.i(TAG, status)
         runOnUiThread {
             statusTextView.text = status
+        }
+    }
+
+    private fun updateCameraState(frontCamera: Boolean) {
+        runOnUiThread {
+            cameraStateTextView.text = if (frontCamera) "Camera: Front" else "Camera: Back"
         }
     }
 

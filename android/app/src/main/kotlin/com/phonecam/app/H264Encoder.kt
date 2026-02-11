@@ -3,6 +3,7 @@ package com.phonecam.app
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
+import android.os.Bundle
 import android.util.Log
 import androidx.camera.core.ImageProxy
 
@@ -128,6 +129,23 @@ class H264Encoder(
 
         mediaCodec = null
         started = false
+    }
+
+    fun requestKeyFrame() {
+        val codec = mediaCodec ?: return
+        if (!started) {
+            return
+        }
+
+        runCatching {
+            codec.setParameters(
+                Bundle().apply {
+                    putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0)
+                },
+            )
+        }.onFailure {
+            Log.w(TAG, "Failed to request keyframe", it)
+        }
     }
 
     private fun drainOutput(codec: MediaCodec) {

@@ -1,6 +1,7 @@
 const { invoke } = window.__TAURI__.core;
 
 let currentStatus = { connected: false, state: "Disconnected" };
+let currentCameraFront = false;
 
 const DEFAULT_SETTINGS = {
   resolution: "1280x720",
@@ -34,6 +35,22 @@ function saveSettings() {
     console.log("Settings saved:", settings);
   } catch (e) {
     console.error("Failed to save settings:", e);
+  }
+}
+
+function updateCameraControlUi() {
+  const cameraStateEl = document.getElementById("camera-state-text");
+  const switchCameraBtn = document.getElementById("switch-camera-btn");
+
+  if (cameraStateEl) {
+    cameraStateEl.textContent = currentCameraFront ? "Front" : "Back";
+  }
+
+  if (switchCameraBtn) {
+    switchCameraBtn.textContent = currentCameraFront
+      ? "Switch to Back Camera"
+      : "Switch to Front Camera";
+    switchCameraBtn.disabled = !currentStatus.connected;
   }
 }
 
@@ -78,6 +95,8 @@ async function updateStatus() {
       connectBtn.disabled = false;
       disconnectBtn.disabled = true;
     }
+
+    updateCameraControlUi();
   } catch (e) {
     console.error("Failed to get status:", e);
   }
@@ -143,6 +162,8 @@ async function connect(ipArg, portArg) {
     saveSettings(); 
     
     await invoke("connect", { ip, port: parseInt(port) });
+    currentCameraFront = false;
+    updateCameraControlUi();
     updateStatus();
   } catch (e) {
     alert("Connection failed: " + e);
@@ -152,9 +173,33 @@ async function connect(ipArg, portArg) {
 async function disconnect() {
   try {
     await invoke("disconnect");
+    currentCameraFront = false;
+    updateCameraControlUi();
     updateStatus();
   } catch (e) {
     alert("Disconnect failed: " + e);
+  }
+}
+
+async function switchCamera() {
+  if (!currentStatus.connected) {
+    alert("Connect to a phone before switching camera");
+    return;
+  }
+
+  const nextFront = !currentCameraFront;
+  const switchCameraBtn = document.getElementById("switch-camera-btn");
+  if (switchCameraBtn) {
+    switchCameraBtn.disabled = true;
+  }
+
+  try {
+    await invoke("switch_camera", { front: nextFront });
+    currentCameraFront = nextFront;
+    updateCameraControlUi();
+  } catch (e) {
+    alert("Camera switch failed: " + e);
+    updateCameraControlUi();
   }
 }
 
@@ -208,6 +253,7 @@ window.addEventListener("DOMContentLoaded", () => {
   const disconnectBtn = document.getElementById("disconnect-btn");
   const showQrBtn = document.getElementById("show-qr-btn");
   const hideQrBtn = document.getElementById("hide-qr-btn");
+  const switchCameraBtn = document.getElementById("switch-camera-btn");
   const resolutionSelect = document.getElementById("resolution-select");
   const fpsSelect = document.getElementById("fps-select");
   
@@ -215,6 +261,7 @@ window.addEventListener("DOMContentLoaded", () => {
   if (disconnectBtn) disconnectBtn.addEventListener("click", disconnect);
   if (showQrBtn) showQrBtn.addEventListener("click", showQrCode);
   if (hideQrBtn) hideQrBtn.addEventListener("click", hideQrCode);
+  if (switchCameraBtn) switchCameraBtn.addEventListener("click", switchCamera);
   
   if (resolutionSelect) resolutionSelect.addEventListener("change", saveSettings);
   if (fpsSelect) fpsSelect.addEventListener("change", saveSettings);
@@ -222,6 +269,7 @@ window.addEventListener("DOMContentLoaded", () => {
   setInterval(updateStatus, 1000);
   setInterval(updateDevices, 3000);
   
+  updateCameraControlUi();
   updateStatus();
   updateDevices();
 });

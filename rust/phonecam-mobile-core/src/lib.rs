@@ -5,9 +5,10 @@ use std::os::raw::c_char;
 use std::sync::{Mutex, OnceLock};
 
 use phonecam_discovery::parse_qr_code_uri;
-use phonecam_protocol::{Message, VideoFrame};
+use phonecam_protocol::{CameraControl, Message, VideoFrame};
 use phonecam_transport::{ConnectionState, PhoneCamClient, TransportConnection};
 use tokio::runtime::{Builder, Runtime};
+use tokio::sync::mpsc::error::TryRecvError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct FrameMetadata {
@@ -45,6 +46,10 @@ struct TransportClient {
 static LAST_FRAME: OnceLock<Mutex<Option<FrameMetadata>>> = OnceLock::new();
 static CORE_CONFIG: OnceLock<Mutex<CoreConfig>> = OnceLock::new();
 static TRANSPORT_CLIENT: OnceLock<Mutex<Option<TransportClient>>> = OnceLock::new();
+
+const CAMERA_SWITCH_NONE: i8 = 0;
+const CAMERA_SWITCH_BACK: i8 = 1;
+const CAMERA_SWITCH_FRONT: i8 = 2;
 
 fn last_frame_slot() -> &'static Mutex<Option<FrameMetadata>> {
     LAST_FRAME.get_or_init(|| Mutex::new(None))
@@ -251,6 +256,42 @@ pub extern "C" fn phonecam_transport_is_connected() -> bool {
             })
         })
         .unwrap_or(false)
+}
+
+#[no_mangle]
+pub extern "C" fn phonecam_poll_switch_camera_command() -> i8 {
+    let mut slot = match transport_client_slot().lock() {
+        Ok(slot) => slot,
+        Err(_) => return CAMERA_SWITCH_NONE,
+    };
+
+    let Some(client) = slot.as_mut() else {
+        return CAMERA_SWITCH_NONE;
+    };
+
+    loop {
+        match client.connection.receiver().try_recv() {
+            Ok(Message::CameraControl(CameraControl::SwitchCamera { front })) => {
+                return if front {
+                    CAMERA_SWITCH_FRONT
+                } else {
+                    CAMERA_SWITCH_BACK
+                }
+            }
+            Ok(Message::Disconnect(_)) => {
+                *slot = None;
+                return CAMERA_SWITCH_NONE;
+            }
+            Ok(_) => {
+                continue;
+            }
+            Err(TryRecvError::Empty) => return CAMERA_SWITCH_NONE,
+            Err(TryRecvError::Disconnected) => {
+                *slot = None;
+                return CAMERA_SWITCH_NONE;
+            }
+        }
+    }
 }
 
 #[no_mangle]

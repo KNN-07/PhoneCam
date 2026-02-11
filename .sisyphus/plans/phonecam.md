@@ -1547,7 +1547,7 @@ Parallel Speedup: ~60% faster than sequential (Waves 3 and 4 have 5-6 parallel t
 
 ---
 
-- [ ] 21. Camera Front/Back Switching Protocol + Implementation
+- [x] 21. Camera Front/Back Switching Protocol + Implementation
 
   **What to do**:
   - Implement `CameraControl::SwitchCamera { front: bool }` message handling in transport layer

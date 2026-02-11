@@ -7,10 +7,10 @@ use std::{
 
 use phonecam_discovery::ServicePublisher;
 use phonecam_driver_linux::{ensure_v4l2loopback_loaded, list_devices, PixelFormat, V4l2Device};
-use phonecam_protocol::{Message, VideoFrame};
+use phonecam_protocol::{CameraControl, Message, VideoFrame};
 use phonecam_transport::{ConnectionState, PhoneCamServer, TransportConnection};
 use tokio::{
-    sync::{watch, Mutex as TokioMutex},
+    sync::{mpsc, watch, Mutex as TokioMutex},
     task::JoinHandle,
 };
 
@@ -70,11 +70,13 @@ struct PipelineRuntime {
     status_rx: watch::Receiver<PipelineStatus>,
     shutdown_tx: Option<watch::Sender<bool>>,
     worker: Option<JoinHandle<()>>,
+    active_connection_sender: Arc<TokioMutex<Option<mpsc::Sender<Message>>>>,
 }
 
 impl PipelineManager {
     pub fn new() -> Self {
         let (status_tx, status_rx) = watch::channel(PipelineStatus::disconnected());
+        let active_connection_sender = Arc::new(TokioMutex::new(None));
 
         Self {
             runtime: Arc::new(TokioMutex::new(PipelineRuntime {
@@ -82,6 +84,7 @@ impl PipelineManager {
                 status_rx,
                 shutdown_tx: None,
                 worker: None,
+                active_connection_sender,
             })),
         }
     }
@@ -101,27 +104,29 @@ impl PipelineManager {
         }
 
         let status_tx = runtime.status_tx.clone();
+        let active_connection_sender = runtime.active_connection_sender.clone();
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
         runtime.shutdown_tx = Some(shutdown_tx);
         runtime.worker = Some(tokio::spawn(async move {
-            run_pipeline(listen_port, status_tx, shutdown_rx).await;
+            run_pipeline(listen_port, status_tx, shutdown_rx, active_connection_sender).await;
         }));
 
         Ok(())
     }
 
     pub async fn stop(&self) -> Result<(), String> {
-        let (shutdown_tx, worker) = {
+        let (shutdown_tx, worker, active_connection_sender) = {
             let mut runtime = self.runtime.lock().await;
             let shutdown_tx = runtime.shutdown_tx.take();
             let worker = runtime.worker.take();
+            let active_connection_sender = runtime.active_connection_sender.clone();
 
             if worker.is_none() {
                 let _ = runtime.status_tx.send(PipelineStatus::disconnected());
             }
 
-            (shutdown_tx, worker)
+            (shutdown_tx, worker, active_connection_sender)
         };
 
         if let Some(shutdown_tx) = shutdown_tx {
@@ -134,6 +139,11 @@ impl PipelineManager {
                 .map_err(|err| format!("pipeline worker join failed: {err}"))?;
         }
 
+        {
+            let mut sender = active_connection_sender.lock().await;
+            *sender = None;
+        }
+
         let runtime = self.runtime.lock().await;
         let _ = runtime.status_tx.send(PipelineStatus::disconnected());
 
@@ -144,13 +154,37 @@ impl PipelineManager {
         let runtime = self.runtime.lock().await;
         runtime.status_rx.borrow().clone()
     }
+
+    pub async fn switch_camera(&self, front: bool) -> Result<(), String> {
+        let active_connection_sender = {
+            let runtime = self.runtime.lock().await;
+            runtime.active_connection_sender.clone()
+        };
+
+        let sender = {
+            let sender = active_connection_sender.lock().await;
+            sender.clone()
+        }
+        .ok_or_else(|| "no active phone connection for camera switch".to_string())?;
+
+        sender
+            .send(Message::CameraControl(CameraControl::SwitchCamera { front }))
+            .await
+            .map_err(|_| "failed to send camera switch command: connection closed".to_string())
+    }
 }
 
 async fn run_pipeline(
     listen_port: u16,
     status_tx: watch::Sender<PipelineStatus>,
     mut shutdown_rx: watch::Receiver<bool>,
+    active_connection_sender: Arc<TokioMutex<Option<mpsc::Sender<Message>>>>,
 ) {
+    {
+        let mut sender = active_connection_sender.lock().await;
+        *sender = None;
+    }
+
     let _publisher = match ServicePublisher::publish(
         DEFAULT_DEVICE_NAME,
         listen_port,
@@ -198,6 +232,11 @@ async fn run_pipeline(
 
     let _ = status_tx.send(PipelineStatus::connected());
 
+    {
+        let mut sender = active_connection_sender.lock().await;
+        *sender = Some(connection.sender().clone());
+    }
+
     match stream_connection(&mut connection, &mut shutdown_rx).await {
         Ok(StreamExit::PeerDisconnected) | Ok(StreamExit::ShutdownRequested) => {
             let _ = status_tx.send(PipelineStatus::disconnected());
@@ -206,6 +245,9 @@ async fn run_pipeline(
             let _ = status_tx.send(PipelineStatus::error(err));
         }
     }
+
+    let mut sender = active_connection_sender.lock().await;
+    *sender = None;
 }
 
 enum StreamExit {

@@ -4,11 +4,14 @@ final class StreamManager: ObservableObject {
     @Published private(set) var statusText = "Idle"
     @Published private(set) var isConnected = false
     @Published var selectedResolution: CaptureResolution = .p720
+    @Published private(set) var isFrontCamera = false
 
     private let cameraController: CameraController
     private var encoder: H264Encoder?
     private var connectionStatusTimer: Timer?
+    private var cameraControlTimer: Timer?
     private var isStreaming = false
+    private var cameraSwitchInProgress = false
 
     private var endpointHost: String = "127.0.0.1"
     private var endpointPort: UInt16 = 7878
@@ -25,6 +28,7 @@ final class StreamManager: ObservableObject {
 
     deinit {
         connectionStatusTimer?.invalidate()
+        cameraControlTimer?.invalidate()
     }
 
     func startStreaming(host: String = "127.0.0.1", port: UInt16 = 7878) {
@@ -62,12 +66,14 @@ final class StreamManager: ObservableObject {
 
             self.cameraController.startSession()
             self.startConnectionStatusPolling()
+            self.startCameraControlPolling()
 
             DispatchQueue.main.async {
                 self.isStreaming = true
+                self.isFrontCamera = self.cameraController.isUsingFrontCamera
                 self.statusText = self.isConnected
-                    ? "Streaming (\(self.selectedResolution.rawValue))"
-                    : "Camera active, transport disconnected"
+                    ? self.streamingStatusText()
+                    : self.disconnectedStatusText()
             }
         }
     }

@@ -5,6 +5,7 @@ use std::{
 
 use local_ip_address::list_afinet_netifas;
 use phonecam_discovery::{format_qr_code_uri, DiscoveredService, ServiceBrowser};
+use phonecam_protocol::{CameraControl, Message};
 use qrcode::{render::svg, QrCode};
 use tauri::State;
 
@@ -76,6 +77,16 @@ pub async fn connect(state: State<'_, AppState>, _ip: String, port: u16) -> Resu
 #[tauri::command]
 pub async fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
     state.pipeline.stop().await
+}
+
+#[tauri::command]
+pub async fn switch_camera(state: State<'_, AppState>, front: bool) -> Result<(), String> {
+    let _message = Message::CameraControl(CameraControl::SwitchCamera { front });
+    state
+        .pipeline
+        .switch_camera(front)
+        .await
+        .map_err(|err| format!("failed to send camera switch command: {err}"))
 }
 
 #[derive(serde::Serialize)]
@@ -187,6 +198,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             connect,
             disconnect,
+            switch_camera,
             get_status,
             get_discovered_devices,
             generate_qr_code,

@@ -21,6 +21,19 @@
         android:textColor="@android:color/white" />
 
     <TextView
+        android:id="@+id/cameraStateTextView"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|start"
+        android:layout_margin="16dp"
+        android:background="#CC1F1F1F"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="8dp"
+        android:text="Camera: Back"
+        android:textColor="@android:color/white"
+        android:textSize="12sp" />
+
+    <TextView
         android:id="@+id/statusTextView"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"

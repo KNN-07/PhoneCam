@@ -14,6 +14,7 @@ final class H264Encoder {
 
     private let encoderQueue = DispatchQueue(label: "com.phonecam.ios.h264-encoder")
     private var compressionSession: VTCompressionSession?
+    private var forceNextKeyFrame = false
 
     private var width: Int32
     private var height: Int32
@@ -48,6 +49,13 @@ final class H264Encoder {
             VTCompressionSessionCompleteFrames(compressionSession, untilPresentationTimeStamp: .invalid)
             VTCompressionSessionInvalidate(compressionSession)
             self.compressionSession = nil
+            self.forceNextKeyFrame = false
+        }
+    }
+
+    func requestKeyFrame() {
+        encoderQueue.async {
+            self.forceNextKeyFrame = true
         }
     }
 
@@ -65,6 +73,7 @@ final class H264Encoder {
             }
 
             try createCompressionSession()
+            forceNextKeyFrame = true
         }
     }
 
@@ -85,13 +94,20 @@ final class H264Encoder {
             let presentationTimeStamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
             let duration = CMSampleBufferGetDuration(sampleBuffer)
             var infoFlags = VTEncodeInfoFlags()
+            var frameProperties: CFDictionary?
+
+            if self.forceNextKeyFrame {
+                self.forceNextKeyFrame = false
+                let options: [CFString: Any] = [kVTEncodeFrameOptionKey_ForceKeyFrame: true]
+                frameProperties = options as CFDictionary
+            }
 
             VTCompressionSessionEncodeFrame(
                 compressionSession,
                 imageBuffer: imageBuffer,
                 presentationTimeStamp: presentationTimeStamp,
                 duration: duration,
-                frameProperties: nil,
+                frameProperties: frameProperties,
                 sourceFrameRefcon: nil,
                 infoFlagsOut: &infoFlags
             )

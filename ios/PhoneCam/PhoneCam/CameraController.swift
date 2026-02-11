@@ -47,6 +47,11 @@ final class CameraController: NSObject, ObservableObject {
     @Published private(set) var authorizationStatus: AVAuthorizationStatus = AVCaptureDevice.authorizationStatus(for: .video)
     @Published private(set) var isSessionRunning = false
     @Published private(set) var interruptionDescription: String?
+    @Published private(set) var activeCameraPosition: AVCaptureDevice.Position = .back
+
+    var isUsingFrontCamera: Bool {
+        activeCameraPosition == .front
+    }
 
     var onSampleBuffer: ((CMSampleBuffer) -> Void)?
 
@@ -133,6 +138,91 @@ final class CameraController: NSObject, ObservableObject {
         }
     }
 
+    func switchCamera(toFront: Bool, completion: @escaping (Bool, Bool) -> Void) {
+        sessionQueue.async {
+            guard self.isConfigured else {
+                DispatchQueue.main.async {
+                    completion(false, self.isUsingFrontCamera)
+                }
+                return
+            }
+
+            let targetPosition: AVCaptureDevice.Position = toFront ? .front : .back
+            let fallbackPosition: AVCaptureDevice.Position = toFront ? .back : .front
+
+            guard
+                let currentInput = self.session.inputs.first(where: { $0 is AVCaptureDeviceInput }) as? AVCaptureDeviceInput,
+                let replacementDevice =
+                    Self.cameraDevice(for: targetPosition)
+                    ?? Self.cameraDevice(for: fallbackPosition)
+                    ?? AVCaptureDevice.default(for: .video)
+            else {
+                DispatchQueue.main.async {
+                    completion(false, self.isUsingFrontCamera)
+                }
+                return
+            }
+
+            let wasRunning = self.session.isRunning
+            if wasRunning {
+                self.session.stopRunning()
+            }
+
+            self.session.beginConfiguration()
+            defer {
+                self.session.commitConfiguration()
+            }
+
+            self.session.removeInput(currentInput)
+
+            do {
+                let replacementInput = try AVCaptureDeviceInput(device: replacementDevice)
+                guard self.session.canAddInput(replacementInput) else {
+                    if self.session.canAddInput(currentInput) {
+                        self.session.addInput(currentInput)
+                    }
+
+                    if wasRunning {
+                        self.session.startRunning()
+                    }
+
+                    DispatchQueue.main.async {
+                        completion(false, self.isUsingFrontCamera)
+                    }
+                    return
+                }
+
+                self.session.addInput(replacementInput)
+                self.activeCameraPosition = replacementDevice.position
+                self.configureVideoOutputConnection()
+            } catch {
+                if self.session.canAddInput(currentInput) {
+                    self.session.addInput(currentInput)
+                    self.activeCameraPosition = currentInput.device.position
+                    self.configureVideoOutputConnection()
+                }
+
+                if wasRunning {
+                    self.session.startRunning()
+                }
+
+                DispatchQueue.main.async {
+                    completion(false, self.isUsingFrontCamera)
+                }
+                return
+            }
+
+            if wasRunning {
+                self.session.startRunning()
+            }
+
+            DispatchQueue.main.async {
+                self.isSessionRunning = self.session.isRunning
+                completion(true, self.isUsingFrontCamera)
+            }
+        }
+    }
+
     private func configureSession(
         for resolution: CaptureResolution,
         completion: @escaping (Bool) -> Void
@@ -162,7 +252,9 @@ final class CameraController: NSObject, ObservableObject {
             self.session.outputs.forEach { self.session.removeOutput($0) }
 
             guard
-                let cameraDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)
+                let cameraDevice =
+                    Self.cameraDevice(for: .back)
+                    ?? Self.cameraDevice(for: .front)
                     ?? AVCaptureDevice.default(for: .video)
             else {
                 DispatchQueue.main.async {
@@ -181,6 +273,7 @@ final class CameraController: NSObject, ObservableObject {
                 }
 
                 self.session.addInput(cameraInput)
+                self.activeCameraPosition = cameraDevice.position
             } catch {
                 DispatchQueue.main.async {
                     completion(false)
@@ -202,15 +295,7 @@ final class CameraController: NSObject, ObservableObject {
             }
 
             self.session.addOutput(self.videoOutput)
-
-            if let connection = self.videoOutput.connection(with: .video) {
-                if connection.isVideoOrientationSupported {
-                    connection.videoOrientation = .portrait
-                }
-                if connection.isVideoMirroringSupported {
-                    connection.isVideoMirrored = false
-                }
-            }
+            self.configureVideoOutputConnection()
 
             self.isConfigured = true
             self.configuredResolution = resolution
@@ -225,6 +310,29 @@ final class CameraController: NSObject, ObservableObject {
                 completion(true)
             }
         }
+    }
+
+    private func configureVideoOutputConnection() {
+        guard let connection = videoOutput.connection(with: .video) else {
+            return
+        }
+
+        if connection.isVideoOrientationSupported {
+            connection.videoOrientation = .portrait
+        }
+
+        if connection.isVideoMirroringSupported {
+            connection.isVideoMirrored = false
+        }
+    }
+
+    private static func cameraDevice(for position: AVCaptureDevice.Position) -> AVCaptureDevice? {
+        AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: position)
+            ?? AVCaptureDevice.DiscoverySession(
+                deviceTypes: [.builtInWideAngleCamera],
+                mediaType: .video,
+                position: position
+            ).devices.first
     }
 
     private func registerSessionObserversIfNeeded() {

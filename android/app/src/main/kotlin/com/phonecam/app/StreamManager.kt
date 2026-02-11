@@ -3,10 +3,14 @@ package com.phonecam.app
 import android.util.Log
 import android.util.Size
 import androidx.camera.core.ImageProxy
+import androidx.camera.view.PreviewView
 import com.sun.jna.Library
 import com.sun.jna.Native
 import com.sun.jna.NativeLong
 import com.sun.jna.Pointer
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.TimeUnit
 
 enum class StreamResolution(
     val width: Int,
@@ -48,6 +52,35 @@ class StreamManager(
 
     @Volatile
     private var started = false
+    @Volatile
+    private var isFrontCamera = false
+    @Volatile
+    private var commandPoller: ScheduledExecutorService? = null
+    @Volatile
+    private var switchInProgress = false
+    @Volatile
+    private var cameraController: CameraController? = null
+    @Volatile
+    private var previewView: PreviewView? = null
+    @Volatile
+    private var onCameraStateChanged: ((Boolean) -> Unit)? = null
+
+    private val cameraSwitchLock = Any()
+
+    fun registerCameraPipeline(
+        cameraController: CameraController,
+        previewView: PreviewView,
+    ) {
+        this.cameraController = cameraController
+        this.previewView = previewView
+        this.isFrontCamera = cameraController.isUsingFrontCamera()
+        notifyCameraStateChanged(this.isFrontCamera)
+    }
+
+    fun setOnCameraStateChanged(listener: (Boolean) -> Unit) {
+        onCameraStateChanged = listener
+        listener(isFrontCamera)
+    }
 
     fun start() {
         if (started) {
@@ -64,6 +97,7 @@ class StreamManager(
 
         encoder.start()
         started = true
+        startCameraControlPolling()
     }
 
     fun stop() {
@@ -72,12 +106,18 @@ class StreamManager(
         }
 
         started = false
+        stopCameraControlPolling()
+        synchronized(cameraSwitchLock) {
+            switchInProgress = false
+        }
         runCatching {
             encoder.stop()
         }.onFailure {
             Log.w(TAG, "Failed stopping encoder", it)
         }
         RustBridge.shutdownTransport()
+        isFrontCamera = false
+        notifyCameraStateChanged(isFrontCamera)
         onStatus("Streaming stopped")
     }
 
@@ -116,6 +156,129 @@ class StreamManager(
 
     fun targetResolution(): Size = config.targetSize
 
+    private fun notifyCameraStateChanged(frontCamera: Boolean) {
+        runCatching {
+            onCameraStateChanged?.invoke(frontCamera)
+        }.onFailure {
+            Log.w(TAG, "Camera state listener failed", it)
+        }
+    }
+
+    private fun startCameraControlPolling() {
+        stopCameraControlPolling()
+
+        commandPoller =
+            Executors.newSingleThreadScheduledExecutor().also { executor ->
+                executor.scheduleAtFixedRate(
+                    {
+                        if (!started) {
+                            return@scheduleAtFixedRate
+                        }
+
+                        val requestedFrontCamera = RustBridge.pollSwitchCameraCommand() ?: return@scheduleAtFixedRate
+                        handleRemoteCameraSwitch(requestedFrontCamera)
+                    },
+                    0,
+                    CAMERA_CONTROL_POLL_INTERVAL_MS,
+                    TimeUnit.MILLISECONDS,
+                )
+            }
+    }
+
+    private fun stopCameraControlPolling() {
+        commandPoller?.shutdownNow()
+        commandPoller = null
+    }
+
+    private fun handleRemoteCameraSwitch(requestFrontCamera: Boolean) {
+        if (!started) {
+            return
+        }
+
+        synchronized(cameraSwitchLock) {
+            if (switchInProgress) {
+                return
+            }
+            switchInProgress = true
+        }
+
+        try {
+            performRemoteCameraSwitch(requestFrontCamera)
+        } finally {
+            synchronized(cameraSwitchLock) {
+                switchInProgress = false
+            }
+        }
+    }
+
+    private fun performRemoteCameraSwitch(requestFrontCamera: Boolean) {
+        val controller = cameraController
+        val preview = previewView
+        if (controller == null || preview == null) {
+            onStatus("Camera switch requested before camera pipeline initialization")
+            return
+        }
+
+        if (requestFrontCamera == isFrontCamera) {
+            return
+        }
+
+        onStatus("Switching to ${if (requestFrontCamera) "front" else "back"} camera…")
+
+        runCatching {
+            encoder.stop()
+        }.onFailure {
+            Log.w(TAG, "Failed to pause encoder for camera switch", it)
+        }
+
+        val actualFrontCamera =
+            runCatching {
+                controller.switchCamera(
+                    useFrontCamera = requestFrontCamera,
+                    previewView = preview,
+                    targetResolution = targetResolution(),
+                    onFrame = ::handleCameraFrame,
+                )
+            }.onFailure {
+                Log.e(TAG, "Camera switch failed", it)
+            }.getOrNull()
+
+        if (actualFrontCamera == null) {
+            runCatching {
+                encoder.start()
+                encoder.requestKeyFrame()
+            }.onFailure {
+                Log.e(TAG, "Failed to recover encoder after camera switch failure", it)
+            }
+            onStatus("Camera switch failed")
+            return
+        }
+
+        val encoderRestarted =
+            runCatching {
+                encoder.start()
+                encoder.requestKeyFrame()
+            }.onFailure {
+                Log.e(TAG, "Failed to restart encoder after camera switch", it)
+            }.isSuccess
+
+        if (!encoderRestarted) {
+            onStatus("Encoder restart failed after camera switch")
+            return
+        }
+
+        isFrontCamera = actualFrontCamera
+        notifyCameraStateChanged(isFrontCamera)
+
+        if (actualFrontCamera != requestFrontCamera) {
+            onStatus(
+                "Requested ${if (requestFrontCamera) "front" else "back"} camera unavailable; using ${if (actualFrontCamera) "front" else "back"}",
+            )
+        } else {
+            onStatus("Switched to ${if (actualFrontCamera) "front" else "back"} camera")
+        }
+    }
+
     private fun onNalUnit(
         nalUnit: ByteArray,
         ptsUs: Long,
@@ -139,6 +302,8 @@ class StreamManager(
         )
 
         fun phonecam_parse_qr_code_uri(uri: String): Pointer?
+
+        fun phonecam_poll_switch_camera_command(): Byte
 
         fun phonecam_string_free(ptr: Pointer?)
     }
@@ -213,6 +378,21 @@ class StreamManager(
             }
         }
 
+        fun pollSwitchCameraCommand(): Boolean? {
+            val commandCode =
+                runCatching {
+                    lib.phonecam_poll_switch_camera_command().toInt()
+                }.onFailure {
+                    Log.w(TAG, "Rust camera control poll failed", it)
+                }.getOrDefault(CAMERA_SWITCH_NONE)
+
+            return when (commandCode) {
+                CAMERA_SWITCH_FRONT -> true
+                CAMERA_SWITCH_BACK -> false
+                else -> null
+            }
+        }
+
         fun setVideoResolution(
             width: Int,
             height: Int,
@@ -248,6 +428,10 @@ class StreamManager(
 
     companion object {
         private const val TAG = "StreamManager"
+        private const val CAMERA_CONTROL_POLL_INTERVAL_MS = 150L
+        private const val CAMERA_SWITCH_NONE = 0
+        private const val CAMERA_SWITCH_BACK = 1
+        private const val CAMERA_SWITCH_FRONT = 2
 
         fun parseQrConnectionUri(uri: String): QrConnectionInfo? = RustBridge.parseQrConnectionUri(uri)
     }
