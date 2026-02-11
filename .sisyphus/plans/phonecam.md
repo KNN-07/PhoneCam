@@ -1332,7 +1332,7 @@ Parallel Speedup: ~60% faster than sequential (Waves 3 and 4 have 5-6 parallel t
 
 ---
 
-- [ ] 18. Android USB (ADB) Integration
+- [x] 18. Android USB (ADB) Integration
 
   **What to do**:
   - Implement ADB port forwarding in desktop Tauri backend

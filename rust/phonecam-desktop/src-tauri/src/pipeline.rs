@@ -14,7 +14,7 @@ use tokio::{
     task::JoinHandle,
 };
 
-use crate::{convert::Nv12ToYuyvConverter, decode::H264Decoder};
+use crate::{adb::AdbManager, convert::Nv12ToYuyvConverter, decode::H264Decoder};
 
 pub const DEFAULT_LISTEN_PORT: u16 = 7_878;
 const DEFAULT_DEVICE_NAME: &str = "PhoneCam Desktop";
@@ -63,6 +63,7 @@ impl PipelineStatus {
 #[derive(Clone)]
 pub struct PipelineManager {
     runtime: Arc<TokioMutex<PipelineRuntime>>,
+    adb_manager: AdbManager,
 }
 
 struct PipelineRuntime {
@@ -71,6 +72,19 @@ struct PipelineRuntime {
     shutdown_tx: Option<watch::Sender<bool>>,
     worker: Option<JoinHandle<()>>,
     active_connection_sender: Arc<TokioMutex<Option<mpsc::Sender<Message>>>>,
+    usb_forward: Option<UsbForwardSession>,
+}
+
+#[derive(Debug, Clone)]
+struct UsbForwardSession {
+    serial: String,
+    local_port: u16,
+}
+
+#[derive(Debug, Clone)]
+enum PipelineStartMode {
+    Wifi,
+    Usb { serial: Option<String> },
 }
 
 impl PipelineManager {
@@ -85,11 +99,22 @@ impl PipelineManager {
                 shutdown_tx: None,
                 worker: None,
                 active_connection_sender,
+                usb_forward: None,
             })),
+            adb_manager: AdbManager::new(),
         }
     }
 
     pub async fn start(&self, port: u16) -> Result<(), String> {
+        self.start_with_mode(port, PipelineStartMode::Wifi).await
+    }
+
+    pub async fn start_usb(&self, port: u16, serial: Option<String>) -> Result<(), String> {
+        self.start_with_mode(port, PipelineStartMode::Usb { serial })
+            .await
+    }
+
+    async fn start_with_mode(&self, port: u16, mode: PipelineStartMode) -> Result<(), String> {
         let listen_port = if port == 0 { DEFAULT_LISTEN_PORT } else { port };
 
         let mut runtime = self.runtime.lock().await;
@@ -103,10 +128,27 @@ impl PipelineManager {
             }
         }
 
+        let usb_forward = match mode {
+            PipelineStartMode::Wifi => None,
+            PipelineStartMode::Usb { serial } => {
+                let selected_serial = self
+                    .adb_manager
+                    .forward(listen_port, listen_port, serial.as_deref())
+                    .await
+                    .map_err(|err| format!("failed to set up ADB USB forward: {err}"))?;
+
+                Some(UsbForwardSession {
+                    serial: selected_serial,
+                    local_port: listen_port,
+                })
+            }
+        };
+
         let status_tx = runtime.status_tx.clone();
         let active_connection_sender = runtime.active_connection_sender.clone();
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
+        runtime.usb_forward = usb_forward;
         runtime.shutdown_tx = Some(shutdown_tx);
         runtime.worker = Some(tokio::spawn(async move {
             run_pipeline(listen_port, status_tx, shutdown_rx, active_connection_sender).await;
@@ -116,17 +158,18 @@ impl PipelineManager {
     }
 
     pub async fn stop(&self) -> Result<(), String> {
-        let (shutdown_tx, worker, active_connection_sender) = {
+        let (shutdown_tx, worker, active_connection_sender, usb_forward) = {
             let mut runtime = self.runtime.lock().await;
             let shutdown_tx = runtime.shutdown_tx.take();
             let worker = runtime.worker.take();
             let active_connection_sender = runtime.active_connection_sender.clone();
+            let usb_forward = runtime.usb_forward.take();
 
             if worker.is_none() {
                 let _ = runtime.status_tx.send(PipelineStatus::disconnected());
             }
 
-            (shutdown_tx, worker, active_connection_sender)
+            (shutdown_tx, worker, active_connection_sender, usb_forward)
         };
 
         if let Some(shutdown_tx) = shutdown_tx {
@@ -142,6 +185,21 @@ impl PipelineManager {
         {
             let mut sender = active_connection_sender.lock().await;
             *sender = None;
+        }
+
+        if let Some(usb_forward) = usb_forward {
+            if let Err(err) = self
+                .adb_manager
+                .kill_forward(usb_forward.local_port, Some(&usb_forward.serial))
+                .await
+            {
+                log::warn!(
+                    "failed to remove ADB forward for {} on tcp:{}: {}",
+                    usb_forward.serial,
+                    usb_forward.local_port,
+                    err
+                );
+            }
         }
 
         let runtime = self.runtime.lock().await;

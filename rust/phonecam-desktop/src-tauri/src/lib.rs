@@ -12,6 +12,7 @@ use tauri::State;
 pub mod convert;
 pub mod decode;
 pub mod pipeline;
+pub mod adb;
 
 #[cfg(target_os = "macos")]
 pub mod driver_macos;
@@ -69,15 +70,53 @@ fn qr_connection_uris() -> Result<Vec<String>, String> {
     Ok(uris)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ConnectionTarget {
+    Wifi,
+    Usb { serial: Option<String> },
+}
+
+fn connection_target_from_input(ip: &str) -> ConnectionTarget {
+    let trimmed = ip.trim();
+
+    let serial = trimmed
+        .strip_prefix("usb:")
+        .or_else(|| trimmed.strip_prefix("adb:"))
+        .or_else(|| trimmed.strip_prefix("usb://"))
+        .or_else(|| trimmed.strip_prefix("adb://"))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+
+    if serial.is_some() {
+        return ConnectionTarget::Usb { serial };
+    }
+
+    if trimmed.eq_ignore_ascii_case("usb")
+        || trimmed.eq_ignore_ascii_case("adb")
+        || trimmed.eq_ignore_ascii_case("localhost")
+        || trimmed == "127.0.0.1"
+    {
+        return ConnectionTarget::Usb { serial: None };
+    }
+
+    ConnectionTarget::Wifi
+}
+
 #[tauri::command]
-pub async fn connect(state: State<'_, AppState>, _ip: String, port: u16) -> Result<(), String> {
+pub async fn connect(state: State<'_, AppState>, ip: String, port: u16) -> Result<(), String> {
     let listen_port = if port == 0 {
         pipeline::DEFAULT_LISTEN_PORT
     } else {
         port
     };
 
-    state.pipeline.start(listen_port).await
+    state.pipeline.stop().await?;
+
+    match connection_target_from_input(&ip) {
+        ConnectionTarget::Wifi => state.pipeline.start(listen_port).await,
+        ConnectionTarget::Usb { serial } => state.pipeline.start_usb(listen_port, serial).await,
+    }
 }
 
 #[tauri::command]
