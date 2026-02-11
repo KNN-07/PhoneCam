@@ -67,7 +67,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Check format
-        run: cargo fmt --workspace --check
+        run: cargo fmt --check
 
       - name: Clippy
         run: cargo clippy ${{ matrix.cargo_flags }} -- -D warnings
