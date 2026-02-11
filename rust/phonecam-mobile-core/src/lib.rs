@@ -167,6 +167,12 @@ fn shutdown_transport_client() {
 /// Raw C FFI entry point for high-frequency H.264 frame payload submission.
 ///
 /// Android and iOS share this exact ABI for performance-sensitive frame ingress.
+///
+/// # Safety
+///
+/// - `data` must be a valid, non-null pointer to at least `len` bytes.
+/// - The memory pointed to by `data` must remain valid for the duration of this call.
+/// - `len` must be the exact size of the data buffer.
 #[no_mangle]
 pub unsafe extern "C" fn phonecam_send_video_frame(
     data: *const u8,
@@ -211,6 +217,12 @@ pub unsafe extern "C" fn phonecam_send_video_frame(
     }
 }
 
+/// Initialize the transport client with the given host and port.
+///
+/// # Safety
+///
+/// - `host` must be a valid, non-null pointer to a null-terminated UTF-8 string.
+/// - The string pointed to by `host` must remain valid for the duration of this call.
 #[no_mangle]
 pub unsafe extern "C" fn phonecam_transport_init(host: *const c_char, port: u16) -> bool {
     if host.is_null() {
@@ -304,6 +316,15 @@ pub extern "C" fn phonecam_set_video_dimensions(width: u16, height: u16) {
     phonecam_set_video_resolution(width, height);
 }
 
+/// Parse a QR code URI and return the parsed result as a C string.
+///
+/// Returns a pointer to an allocated C string in the format "ip|port|name".
+/// The caller is responsible for freeing the returned pointer using `phonecam_string_free`.
+///
+/// # Safety
+///
+/// - `uri` must be a valid, non-null pointer to a null-terminated UTF-8 string.
+/// - The string pointed to by `uri` must remain valid for the duration of this call.
 #[no_mangle]
 pub unsafe extern "C" fn phonecam_parse_qr_code_uri(uri: *const c_char) -> *mut c_char {
     if uri.is_null() {
@@ -332,6 +353,13 @@ pub extern "C" fn phonecam_ffi_test_message() -> *mut c_char {
         .into_raw()
 }
 
+/// Free a string pointer that was returned by a PhoneCam FFI function.
+///
+/// # Safety
+///
+/// - `ptr` must be a pointer returned by a PhoneCam FFI function that returns `*mut c_char`.
+/// - `ptr` must not have been freed before.
+/// - After calling this function, `ptr` becomes invalid and must not be used again.
 #[no_mangle]
 pub unsafe extern "C" fn phonecam_string_free(ptr: *mut c_char) {
     if ptr.is_null() {
