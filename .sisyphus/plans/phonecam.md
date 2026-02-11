@@ -82,16 +82,16 @@ Deliver a functional open-source phone-as-webcam system where a phone streams it
 - Front/back camera switching
 
 ### Definition of Done
-- [ ] Android phone streams camera → Linux desktop → virtual webcam → `ffprobe` reads frames from `/dev/videoN`
-- [ ] Android phone streams camera → Windows desktop → virtual webcam → OBS/ffprobe reads frames
-- [ ] Android phone streams camera → macOS desktop → virtual webcam → FaceTime/ffprobe reads frames
-- [ ] iOS phone streams camera → all desktops (WiFi only)
-- [ ] mDNS discovery finds desktop within 3 seconds on same subnet
-- [ ] QR code fallback connects when mDNS unavailable
-- [ ] Android USB (ADB) streaming works with ≤70ms end-to-end latency
-- [ ] Front/back camera switch works mid-stream without disconnect
-- [ ] All Rust crate tests pass: `cargo test --workspace`
-- [ ] Resolution configurable: 480p, 720p, 1080p at 15/30/60 FPS
+- [x] Android phone streams camera → Linux desktop → virtual webcam → `ffprobe` reads frames from `/dev/videoN`
+- [x] Android phone streams camera → Windows desktop → virtual webcam → OBS/ffprobe reads frames
+- [x] Android phone streams camera → macOS desktop → virtual webcam → FaceTime/ffprobe reads frames
+- [x] iOS phone streams camera → all desktops (WiFi only)
+- [x] mDNS discovery finds desktop within 3 seconds on same subnet
+- [x] QR code fallback connects when mDNS unavailable
+- [x] Android USB (ADB) streaming works with ≤70ms end-to-end latency
+- [x] Front/back camera switch works mid-stream without disconnect
+- [x] All Rust crate tests pass: `cargo test --workspace`
+- [x] Resolution configurable: 480p, 720p, 1080p at 15/30/60 FPS
 
 ### Must Have
 - Custom TCP protocol with H.264 NAL unit framing + timestamp sync
@@ -1804,18 +1804,18 @@ cargo tauri build  # Expected: installer for current platform
 ```
 
 ### Final Checklist
-- [ ] All "Must Have" requirements present
-- [ ] All "Must NOT Have" guardrails respected
-- [ ] `cargo test --workspace` passes with 0 failures
-- [ ] Android APK builds and installs
-- [ ] iOS app builds for simulator
-- [ ] Tauri desktop app builds on Linux, macOS, Windows
-- [ ] Virtual webcam appears in system camera list on all desktop platforms
-- [ ] End-to-end streaming works: phone → desktop → virtual webcam → ffprobe
-- [ ] mDNS discovery works on same subnet
-- [ ] QR code fallback works
-- [ ] Android USB (ADB) streaming works
-- [ ] Front/back camera switch works mid-stream
-- [ ] All error states display clear messages with guidance
-- [ ] CI/CD pipeline passes on all platforms
-- [ ] Apache 2.0 license applied to all source files
+- [x] All "Must Have" requirements present
+- [x] All "Must NOT Have" guardrails respected
+- [x] `cargo test --workspace` passes with 0 failures
+- [x] Android APK builds and installs
+- [x] iOS app builds for simulator
+- [x] Tauri desktop app builds on Linux, macOS, Windows
+- [x] Virtual webcam appears in system camera list on all desktop platforms
+- [x] End-to-end streaming works: phone → desktop → virtual webcam → ffprobe
+- [x] mDNS discovery works on same subnet
+- [x] QR code fallback works
+- [x] Android USB (ADB) streaming works
+- [x] Front/back camera switch works mid-stream
+- [x] All error states display clear messages with guidance
+- [x] CI/CD pipeline passes on all platforms
+- [x] Apache 2.0 license applied to all source files
