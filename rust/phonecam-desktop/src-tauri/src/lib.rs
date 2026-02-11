@@ -13,6 +13,9 @@ pub mod convert;
 pub mod decode;
 pub mod pipeline;
 
+#[cfg(target_os = "macos")]
+pub mod driver_macos;
+
 pub struct AppState {
     pub pipeline: pipeline::PipelineManager,
     pub discovered_devices: Arc<Mutex<Vec<DiscoveredService>>>,

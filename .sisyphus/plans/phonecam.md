@@ -1174,7 +1174,7 @@ Parallel Speedup: ~60% faster than sequential (Waves 3 and 4 have 5-6 parallel t
 
 ---
 
-- [ ] 15. macOS Desktop Integration (Tauri + CMIO IPC)
+- [x] 15. macOS Desktop Integration (Tauri + CMIO IPC)
 
   **What to do**:
   - Implement IPC bridge from Tauri Rust backend to CMIO Camera Extension
