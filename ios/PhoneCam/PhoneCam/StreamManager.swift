@@ -93,6 +93,8 @@ final class StreamManager: ObservableObject {
 
         connectionStatusTimer?.invalidate()
         connectionStatusTimer = nil
+        stopCameraControlPolling()
+        cameraSwitchInProgress = false
 
         DispatchQueue.main.async {
             self.isStreaming = false
@@ -132,8 +134,8 @@ final class StreamManager: ObservableObject {
 
             DispatchQueue.main.async {
                 self.statusText = self.isConnected
-                    ? "Streaming (\(resolution.rawValue))"
-                    : "Camera active, transport disconnected"
+                    ? self.streamingStatusText()
+                    : self.disconnectedStatusText()
             }
         }
     }
@@ -269,6 +271,88 @@ final class StreamManager: ObservableObject {
         )
     }
 
+    private func streamingStatusText() -> String {
+        "Streaming (\(selectedResolution.rawValue), \(isFrontCamera ? "front" : "back") camera)"
+    }
+
+    private func disconnectedStatusText() -> String {
+        "Camera active, transport disconnected (\(isFrontCamera ? "front" : "back") camera)"
+    }
+
+    private func startCameraControlPolling() {
+        stopCameraControlPolling()
+
+        let timer = Timer.scheduledTimer(withTimeInterval: Self.cameraControlPollInterval, repeats: true) { [weak self] _ in
+            self?.pollCameraControlCommand()
+        }
+
+        RunLoop.main.add(timer, forMode: .common)
+        cameraControlTimer = timer
+    }
+
+    private func stopCameraControlPolling() {
+        cameraControlTimer?.invalidate()
+        cameraControlTimer = nil
+    }
+
+    private func pollCameraControlCommand() {
+        guard isStreaming, !cameraSwitchInProgress else {
+            return
+        }
+
+        let command = phonecam_poll_switch_camera_command()
+        switch command {
+        case Self.cameraSwitchFrontCommand:
+            handleRemoteCameraSwitch(toFront: true)
+        case Self.cameraSwitchBackCommand:
+            handleRemoteCameraSwitch(toFront: false)
+        default:
+            return
+        }
+    }
+
+    private func handleRemoteCameraSwitch(toFront: Bool) {
+        guard isStreaming, !cameraSwitchInProgress else {
+            return
+        }
+
+        cameraSwitchInProgress = true
+        statusText = "Switching to \(toFront ? "front" : "back") camera…"
+
+        cameraController.stopSession()
+        encoder?.stop()
+        encoder = nil
+
+        cameraController.switchCamera(toFront: toFront) { [weak self] success, actualFront in
+            guard let self else {
+                return
+            }
+
+            defer {
+                self.cameraSwitchInProgress = false
+            }
+
+            self.configureEncoder(for: self.selectedResolution)
+            self.applyVideoDimensionsToRust()
+            self.cameraController.startSession()
+            self.encoder?.requestKeyFrame()
+
+            self.isFrontCamera = actualFront
+
+            guard success else {
+                self.statusText = "Camera switch failed"
+                return
+            }
+
+            if actualFront != toFront {
+                self.statusText = "Requested \(toFront ? "front" : "back") camera unavailable; using \(actualFront ? "front" : "back")"
+                return
+            }
+
+            self.statusText = self.isConnected ? self.streamingStatusText() : self.disconnectedStatusText()
+        }
+    }
+
     private func startConnectionStatusPolling() {
         connectionStatusTimer?.invalidate()
 
@@ -285,13 +369,17 @@ final class StreamManager: ObservableObject {
             self.isConnected = connected
 
             if connected {
-                self.statusText = "Streaming (\(self.selectedResolution.rawValue))"
+                self.statusText = self.streamingStatusText()
             } else if self.isStreaming {
-                self.statusText = "Camera active, transport disconnected"
+                self.statusText = self.disconnectedStatusText()
             }
         }
 
         RunLoop.main.add(timer, forMode: .common)
         connectionStatusTimer = timer
     }
+
+    private static let cameraControlPollInterval: TimeInterval = 0.15
+    private static let cameraSwitchBackCommand: Int8 = 1
+    private static let cameraSwitchFrontCommand: Int8 = 2
 }

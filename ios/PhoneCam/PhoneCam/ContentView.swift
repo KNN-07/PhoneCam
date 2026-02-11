@@ -28,9 +28,15 @@ struct ContentView: View {
 
                         Spacer()
 
-                        Text(cameraController.isSessionRunning ? "Camera On" : "Camera Off")
-                            .foregroundColor(.white.opacity(0.85))
-                            .font(.footnote)
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text(streamManager.isFrontCamera ? "Camera: Front" : "Camera: Back")
+                                .foregroundColor(.white.opacity(0.85))
+                                .font(.footnote)
+
+                            Text(cameraController.isSessionRunning ? "Session On" : "Session Off")
+                                .foregroundColor(.white.opacity(0.75))
+                                .font(.caption2)
+                        }
                     }
 
                     if let interruption = cameraController.interruptionDescription {
