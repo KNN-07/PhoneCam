@@ -905,7 +905,7 @@ Parallel Speedup: ~60% faster than sequential (Waves 3 and 4 have 5-6 parallel t
 
 ---
 
-- [ ] 11. Windows Virtual Camera Driver (C++)
+- [x] 11. Windows Virtual Camera Driver (C++)
 
   **What to do**:
   - Create C++ project in `windows/PhoneCamDriver/` with CMake or MSBuild
