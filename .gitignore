@@ -1,25 +1,46 @@
-/target
-/dist
-/node_modules
+# OS files
 .DS_Store
 Thumbs.db
-*.log
-.env
-.env.*
-!.env.example
+
+# Editor / IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# Rust build artifacts (all targets, including subcrate-local)
+/target
+**/target/
+
+# Rust lock file (workspace has no published crates)
 Cargo.lock
 
-# Android SDK (should not be committed)
+# Android SDK (local install, should not be committed)
 .android-sdk/
 
-# Build artifacts
-rust/phonecam-mobile-core/target/
-rust/phonecam-desktop/test-results/
+# Android build artifacts
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
 
-# IDE
-.vscode/
-.idea/
+# iOS / Xcode
+ios/build/
+ios/DerivedData/
+ios/**/*.xcuserdata/
+*.xcworkspace/xcuserdata/
+
+# Node (if any tooling)
+/node_modules
+/dist
+
+# Test results
+rust/phonecam-desktop/test-results/
