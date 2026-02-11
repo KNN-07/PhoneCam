@@ -42,3 +42,13 @@
 - The `v4l` crate provides safe Rust bindings for V4L2 ioctls via `context::enum_devices()` for device enumeration.
 - Structured error types with installation instructions per distro (Ubuntu/Debian, Fedora, Arch) improve UX when module not loaded.
 - Minimal stub implementation strategy: module detection + error handling first, actual frame writing deferred until H.264 decode pipeline exists.
+
+## 2026-02-11 (Wave 3 - Video Pipeline)
+
+- ffmpeg-next crate provides safe Rust bindings for FFmpeg decoder initialization and frame decoding
+- H.264 decoder stub pattern: Define types (Nv12Frame, DecodeOutput) with TDD tests containing sample H.264 Annex-B NAL units, then implement in "green" phase
+- CameraX on Android: Use ImageAnalysis with KEEP_ONLY_LATEST backpressure for low-latency frame capture, avoiding buffering delays
+- MediaCodec H.264 encoder: Configure with KEY_BITRATE_MODE_CBR, KEY_I_FRAME_INTERVAL=1, KEY_PROFILE=AVCProfileBaseline for consistent streaming
+- AVFoundation iOS: Use AVCaptureVideoDataOutput with dedicated serial queue for frame capture, AVCaptureSession.Preset for resolution
+- VideoToolbox: Create VTCompressionSession with kVTCompressionPropertyKey_RealTime=true and kVTCompressionPropertyKey_AllowFrameReordering=false for low latency
+- Rust FFI pattern: Swift/Kotlin pass raw frame buffers to phonecam_send_video_frame C FFI, Rust wraps in protocol::VideoFrame and sends via transport
