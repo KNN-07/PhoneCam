@@ -12,3 +12,14 @@ Thumbs.db
 *.swp
 *.swo
 Cargo.lock
+
+# Android SDK (should not be committed)
+.android-sdk/
+
+# Build artifacts
+rust/phonecam-mobile-core/target/
+rust/phonecam-desktop/test-results/
+
+# IDE
+.vscode/
+.idea/
