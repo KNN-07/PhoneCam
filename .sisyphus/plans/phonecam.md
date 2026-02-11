@@ -1286,7 +1286,7 @@ Parallel Speedup: ~60% faster than sequential (Waves 3 and 4 have 5-6 parallel t
 
 ---
 
-- [ ] 17. iOS WiFi Integration
+- [x] 17. iOS WiFi Integration
 
   **What to do**:
   - Wire iOS app to connect to desktop over WiFi using Rust transport client
