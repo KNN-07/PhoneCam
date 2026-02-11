@@ -1470,7 +1470,7 @@ Parallel Speedup: ~60% faster than sequential (Waves 3 and 4 have 5-6 parallel t
 
 ---
 
-- [ ] 20. Tauri Settings Frontend (Resolution/FPS/Camera Controls UI)
+- [x] 20. Tauri Settings Frontend (Resolution/FPS/Camera Controls UI)
 
   **What to do**:
   - Build settings panel in Tauri web frontend

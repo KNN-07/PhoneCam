@@ -13,10 +13,33 @@
         <div id="status-indicator" class="status disconnected">
           <span class="status-dot"></span>
           <span class="status-text">Disconnected</span>
+          <span class="fps-counter" style="display: none; margin-left: 10px;">FPS: -</span>
         </div>
       </header>
 
       <main class="main-content">
+        <section class="settings-section">
+          <h2>Settings</h2>
+          <div class="settings-grid">
+            <div class="setting-item">
+              <label for="resolution-select">Resolution</label>
+              <select id="resolution-select" class="select-field">
+                <option value="640x480">480p (640x480)</option>
+                <option value="1280x720">720p (1280x720)</option>
+                <option value="1920x1080">1080p (1920x1080)</option>
+              </select>
+            </div>
+            <div class="setting-item">
+              <label for="fps-select">FPS</label>
+              <select id="fps-select" class="select-field">
+                <option value="15">15 FPS</option>
+                <option value="30">30 FPS</option>
+                <option value="60">60 FPS</option>
+              </select>
+            </div>
+          </div>
+        </section>
+
         <section class="discovery-section">
           <h2>Discovered Devices</h2>
           <div class="device-list-container">

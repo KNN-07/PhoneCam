@@ -63,3 +63,9 @@
 - v4l2 device format setting: Call `device.set_format(width, height, PixelFormat::YUYV)` when resolution changes, before writing frames
 - Environment variable `PHONECAM_V4L2_DEVICE` allows manual override of default v4l2 device selection for testing/debugging
 - Error handling strategy: Decode/convert failures log warnings but continue (allow pipeline to recover), device failures return Err and exit stream loop
+
+## 2026-02-11 (Wave 4 - Tauri Frontend)
+
+- Mocking Tauri Backend: When testing Tauri frontend in a browser environment (like Playwright), `window.__TAURI__` is undefined. You must inject a mock implementation using `page.addInitScript` before page load to test logic that depends on backend commands.
+- Playwright Skill Usage: To interact with the Playwright MCP server, load the `playwright` skill first, then use `skill_mcp` with `mcp_name="playwright"` and appropriate tool names (e.g., `browser_navigate`, `browser_run_code`).
+- localStorage Persistence: Settings can be persisted to `localStorage` in the frontend without backend support, useful for UI-only preferences like resolution/FPS before connection.
