@@ -8,11 +8,11 @@
 #include <atomic>
 #include <functional>
 #include <new>
+#include <string>
 
 #include "guids.h"
 #include "module.h"
 
-extern "C" HRESULT WINAPI AMovieDllRegisterServer2(BOOL register_filter);
 extern HRESULT PhoneCamCreateFilterInstance(REFIID riid, void** ppv);
 
 namespace {
@@ -79,6 +79,108 @@ class PhoneCamClassFactory final : public IClassFactory {
   private:
     volatile long ref_count_;
 };
+
+HRESULT SetRegistryString(HKEY key, LPCWSTR value_name, const std::wstring& value) {
+    const LSTATUS status = RegSetValueExW(
+        key,
+        value_name,
+        0,
+        REG_SZ,
+        reinterpret_cast<const BYTE*>(value.c_str()),
+        static_cast<DWORD>((value.size() + 1) * sizeof(wchar_t)));
+    return status == ERROR_SUCCESS ? S_OK : HRESULT_FROM_WIN32(status);
+}
+
+HRESULT ComServerRegistryPath(std::wstring* path) {
+    if (path == nullptr) {
+        return E_POINTER;
+    }
+
+    wchar_t clsid[64] = {};
+    if (StringFromGUID2(CLSID_PhoneCamFilter, clsid, ARRAYSIZE(clsid)) == 0) {
+        return E_FAIL;
+    }
+
+    *path = L"CLSID\\";
+    path->append(clsid);
+    return S_OK;
+}
+
+HRESULT RegisterComServer() {
+    wchar_t module_path[MAX_PATH] = {};
+    const DWORD module_path_length = GetModuleFileNameW(PhoneCamModuleHandle(), module_path, ARRAYSIZE(module_path));
+    if (module_path_length == 0) {
+        return HRESULT_FROM_WIN32(GetLastError());
+    }
+    if (module_path_length >= ARRAYSIZE(module_path)) {
+        return HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER);
+    }
+
+    std::wstring registry_path;
+    HRESULT hr = ComServerRegistryPath(&registry_path);
+    if (FAILED(hr)) {
+        return hr;
+    }
+
+    HKEY class_key = nullptr;
+    LSTATUS status = RegCreateKeyExW(
+        HKEY_CLASSES_ROOT,
+        registry_path.c_str(),
+        0,
+        nullptr,
+        REG_OPTION_NON_VOLATILE,
+        KEY_WRITE,
+        nullptr,
+        &class_key,
+        nullptr);
+    if (status != ERROR_SUCCESS) {
+        return HRESULT_FROM_WIN32(status);
+    }
+
+    hr = SetRegistryString(class_key, nullptr, kPhoneCamFilterName);
+    if (SUCCEEDED(hr)) {
+        HKEY server_key = nullptr;
+        status = RegCreateKeyExW(
+            class_key,
+            L"InprocServer32",
+            0,
+            nullptr,
+            REG_OPTION_NON_VOLATILE,
+            KEY_WRITE,
+            nullptr,
+            &server_key,
+            nullptr);
+        if (status == ERROR_SUCCESS) {
+            hr = SetRegistryString(server_key, nullptr, module_path);
+            if (SUCCEEDED(hr)) {
+                hr = SetRegistryString(server_key, L"ThreadingModel", L"Both");
+            }
+            RegCloseKey(server_key);
+        } else {
+            hr = HRESULT_FROM_WIN32(status);
+        }
+    }
+
+    RegCloseKey(class_key);
+    if (FAILED(hr)) {
+        RegDeleteTreeW(HKEY_CLASSES_ROOT, registry_path.c_str());
+    }
+    return hr;
+}
+
+HRESULT UnregisterComServer() {
+    std::wstring registry_path;
+    const HRESULT path_hr = ComServerRegistryPath(&registry_path);
+    if (FAILED(path_hr)) {
+        return path_hr;
+    }
+
+    const LSTATUS status = RegDeleteTreeW(HKEY_CLASSES_ROOT, registry_path.c_str());
+    if (status == ERROR_SUCCESS || status == ERROR_FILE_NOT_FOUND || status == ERROR_PATH_NOT_FOUND) {
+        return S_OK;
+    }
+    return HRESULT_FROM_WIN32(status);
+}
 
 HRESULT RegisterCaptureFilterCategory() {
     IFilterMapper2* mapper = nullptr;
@@ -223,14 +325,14 @@ extern "C" STDAPI DllGetClassObject(REFCLSID clsid, REFIID riid, void** ppv) {
 }
 
 extern "C" STDAPI DllRegisterServer(void) {
-    HRESULT hr = AMovieDllRegisterServer2(TRUE);
+    HRESULT hr = RegisterComServer();
     if (FAILED(hr)) {
         return hr;
     }
 
     hr = WithComApartment([]() { return RegisterCaptureFilterCategory(); });
     if (FAILED(hr)) {
-        AMovieDllRegisterServer2(FALSE);
+        UnregisterComServer();
     }
 
     return hr;
@@ -238,7 +340,7 @@ extern "C" STDAPI DllRegisterServer(void) {
 
 extern "C" STDAPI DllUnregisterServer(void) {
     const HRESULT category_hr = WithComApartment([]() { return UnregisterCaptureFilterCategory(); });
-    const HRESULT unregister_hr = AMovieDllRegisterServer2(FALSE);
+    const HRESULT unregister_hr = UnregisterComServer();
 
     if (FAILED(unregister_hr)) {
         return unregister_hr;
