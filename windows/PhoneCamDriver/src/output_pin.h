@@ -3,6 +3,7 @@
 #if defined(_WIN32)
 
 #include <dshow.h>
+#include <ks.h>
 #include <ksproxy.h>
 
 #include <atomic>
@@ -20,7 +21,7 @@ class PhoneCamOutputPin final : public IPin,
                                 public IMemInputPin {
   public:
     explicit PhoneCamOutputPin(PhoneCamFilter* filter);
-    ~PhoneCamOutputPin() override;
+    ~PhoneCamOutputPin();
 
     HRESULT StartStreaming(REFERENCE_TIME stream_start);
     HRESULT PauseStreaming();

@@ -18,7 +18,7 @@ class SinglePinEnum final : public IEnumPins {
         }
     }
 
-    ~SinglePinEnum() override {
+    ~SinglePinEnum() {
         if (pin_ != nullptr) {
             pin_->Release();
             pin_ = nullptr;

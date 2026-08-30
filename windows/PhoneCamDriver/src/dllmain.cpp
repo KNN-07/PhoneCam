@@ -3,7 +3,6 @@
 #include <windows.h>
 #include <initguid.h>
 #include <dshow.h>
-#include <strmiids.h>
 
 #include <atomic>
 #include <functional>

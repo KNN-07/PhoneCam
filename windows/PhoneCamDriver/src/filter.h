@@ -5,6 +5,7 @@
 #if defined(_WIN32)
 
 #include <dshow.h>
+#include <ks.h>
 #include <ksproxy.h>
 
 #include <atomic>
@@ -15,7 +16,7 @@ class PhoneCamOutputPin;
 class PhoneCamFilter final : public IBaseFilter, public ISpecifyPropertyPages {
   public:
     PhoneCamFilter();
-    ~PhoneCamFilter() override;
+    ~PhoneCamFilter();
 
     static HRESULT CreateInstance(REFIID riid, void** ppv);
 

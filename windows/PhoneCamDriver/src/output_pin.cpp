@@ -214,7 +214,7 @@ class MediaTypeEnum final : public IEnumMediaTypes {
         }
     }
 
-    ~MediaTypeEnum() override {
+    ~MediaTypeEnum() {
         for (ULONG i = 0; i < count_; ++i) {
             ReleaseMediaType(&media_types_[i]);
         }
