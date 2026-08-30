@@ -212,6 +212,10 @@ async fn established_connection_still_enforces_keepalive_timeout() {
     .await;
 }
 
+#[cfg_attr(
+    tarpaulin,
+    ignore = "wall-clock latency is invalid under coverage instrumentation"
+)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn latency() {
     let server = PhoneCamServer::bind("127.0.0.1:0", handshake("desktop", None))

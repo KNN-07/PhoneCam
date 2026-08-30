@@ -10,3 +10,6 @@ repository.workspace = true
 tokio.workspace = true
 thiserror.workspace = true
 phonecam-protocol = { path = "../phonecam-protocol" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin)'] }
