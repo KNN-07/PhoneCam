@@ -5,6 +5,11 @@ project(PhoneCamDriver LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+enable_testing()
+add_executable(stream_formats_test tests/stream_formats_test.cpp)
+target_include_directories(stream_formats_test PRIVATE src)
+add_test(NAME stream_formats COMMAND stream_formats_test)
+
 
 if(NOT WIN32)
   message(STATUS "PhoneCamDriver is Windows-only. Skipping native target generation on this platform.")

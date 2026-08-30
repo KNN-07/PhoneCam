@@ -25,19 +25,32 @@
               <label for="resolution-select">Resolution</label>
               <select id="resolution-select" class="select-field">
                 <option value="640x480">480p (640x480)</option>
-                <option value="1280x720">720p (1280x720)</option>
+                <option value="1280x720" selected>720p (1280x720)</option>
                 <option value="1920x1080">1080p (1920x1080)</option>
+                <option value="2560x1440">1440p (2560x1440)</option>
+                <option value="3840x2160">4K (3840x2160)</option>
               </select>
             </div>
             <div class="setting-item">
               <label for="fps-select">FPS</label>
               <select id="fps-select" class="select-field">
                 <option value="15">15 FPS</option>
-                <option value="30">30 FPS</option>
+                <option value="30" selected>30 FPS</option>
                 <option value="60">60 FPS</option>
               </select>
             </div>
+            <div class="setting-item">
+              <label for="codec-select">Codec</label>
+              <select id="codec-select" class="select-field">
+                <option value="h264" selected>H.264</option>
+                <option value="hevc">HEVC</option>
+                <option value="auto">Auto</option>
+              </select>
+            </div>
           </div>
+          <p id="active-profile" class="settings-summary" aria-live="polite">
+            Active: waiting for phone
+          </p>
         </section>
 
         <section class="discovery-section">

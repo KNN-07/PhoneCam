@@ -2,6 +2,7 @@ use std::net::IpAddr;
 
 use local_ip_address::list_afinet_netifas;
 use phonecam_discovery::format_qr_code_uri;
+use phonecam_protocol::{StreamProfile, SUPPORTED_DIMENSIONS, SUPPORTED_FRAME_RATES};
 use qrcode::{render::svg, QrCode};
 use tauri::{Manager, State};
 
@@ -135,23 +136,27 @@ async fn configure_stream(
     width: u16,
     height: u16,
     fps: u8,
-) -> Result<(), String> {
+    codec: String,
+) -> Result<StreamProfile, String> {
     validate_stream_configuration(width, height, fps)?;
+    let preference = match codec.as_str() {
+        "h264" => pipeline::CodecPreference::H264,
+        "hevc" => pipeline::CodecPreference::Hevc,
+        "auto" => pipeline::CodecPreference::Auto,
+        _ => return Err(format!("unsupported codec preference {codec}")),
+    };
     state
         .pipeline
-        .configure_stream(width, height, fps)
+        .configure_stream(width, height, fps, preference)
         .await
         .map_err(|err| format!("failed to configure phone stream: {err}"))
 }
 
 fn validate_stream_configuration(width: u16, height: u16, fps: u8) -> Result<(), String> {
-    const RESOLUTIONS: &[(u16, u16)] = &[(640, 480), (1280, 720), (1920, 1080)];
-    const FRAME_RATES: &[u8] = &[15, 30, 60];
-
-    if !RESOLUTIONS.contains(&(width, height)) {
+    if !SUPPORTED_DIMENSIONS.contains(&(width, height)) {
         return Err(format!("unsupported resolution {width}x{height}"));
     }
-    if !FRAME_RATES.contains(&fps) {
+    if !SUPPORTED_FRAME_RATES.contains(&fps) {
         return Err(format!("unsupported frame rate {fps}"));
     }
     Ok(())
@@ -162,6 +167,9 @@ pub struct Status {
     pub connected: bool,
     pub state: String,
     pub last_error: Option<String>,
+    pub supported_profiles: Vec<StreamProfile>,
+    pub active_profile: Option<StreamProfile>,
+    pub output_format: Option<output::NativeOutputFormat>,
 }
 
 #[tauri::command]
@@ -172,6 +180,9 @@ async fn get_status(state: State<'_, AppState>) -> Result<Status, String> {
         connected: pipeline_status.connected,
         state: pipeline_status.state,
         last_error: pipeline_status.last_error,
+        supported_profiles: pipeline_status.supported_profiles,
+        active_profile: pipeline_status.active_profile,
+        output_format: pipeline_status.output_format,
     })
 }
 

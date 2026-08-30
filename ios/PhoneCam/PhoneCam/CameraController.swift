@@ -6,17 +6,18 @@ enum CaptureResolution: String, CaseIterable, Identifiable {
     case p480 = "480p"
     case p720 = "720p"
     case p1080 = "1080p"
+    case p1440 = "1440p"
+    case p2160 = "2160p"
 
     var id: String { rawValue }
 
     var dimensions: (width: Int32, height: Int32) {
         switch self {
-        case .p480:
-            return (640, 480)
-        case .p720:
-            return (1280, 720)
-        case .p1080:
-            return (1920, 1080)
+        case .p480: return (640, 480)
+        case .p720: return (1280, 720)
+        case .p1080: return (1920, 1080)
+        case .p1440: return (2560, 1440)
+        case .p2160: return (3840, 2160)
         }
     }
 
@@ -27,32 +28,71 @@ enum CaptureResolution: String, CaseIterable, Identifiable {
 
     var sessionPreset: AVCaptureSession.Preset {
         switch self {
-        case .p480:
-            return .vga640x480
-        case .p720:
-            return .hd1280x720
-        case .p1080:
-            return .hd1920x1080
+        case .p480: return .vga640x480
+        case .p720: return .hd1280x720
+        case .p1080: return .hd1920x1080
+        case .p1440, .p2160: return .inputPriority
         }
     }
 
     var targetBitrate: Int {
         switch self {
-        case .p480:
-            return 2_000_000
-        case .p720:
-            return 4_000_000
-        case .p1080:
-            return 5_000_000
+        case .p480: return 2_000_000
+        case .p720: return 4_000_000
+        case .p1080: return 8_000_000
+        case .p1440: return 16_000_000
+        case .p2160: return 35_000_000
         }
     }
 
     static func matching(width: UInt16, height: UInt16) -> CaptureResolution? {
-        allCases.first { resolution in
-            let dimensions = resolution.dimensionsU16
-            return dimensions.width == width && dimensions.height == height
+        allCases.first {
+            let value = $0.dimensionsU16
+            return value.width == width && value.height == height
         }
     }
+}
+
+struct CaptureProfile: Hashable {
+    let resolution: CaptureResolution
+    let fps: Int32
+}
+
+struct CaptureFormatDescriptor: Equatable {
+    let index: Int
+    let width: Int32
+    let height: Int32
+    let minimumFrameRate: Double
+    let maximumFrameRate: Double
+    let isFullRangeNV12: Bool
+    let isBinned: Bool
+}
+
+func selectCaptureFormat(
+    from descriptors: [CaptureFormatDescriptor],
+    width: Int32,
+    height: Int32,
+    fps: Int32
+) -> CaptureFormatDescriptor? {
+    let requestedFps = Double(fps)
+    return descriptors
+        .filter {
+            $0.width == width && $0.height == height
+                && $0.minimumFrameRate <= requestedFps
+                && requestedFps <= $0.maximumFrameRate
+        }
+        .max { lhs, rhs in
+            if lhs.isFullRangeNV12 != rhs.isFullRangeNV12 {
+                return !lhs.isFullRangeNV12 && rhs.isFullRangeNV12
+            }
+            if lhs.isBinned != rhs.isBinned {
+                return lhs.isBinned && !rhs.isBinned
+            }
+            if lhs.maximumFrameRate != rhs.maximumFrameRate {
+                return lhs.maximumFrameRate < rhs.maximumFrameRate
+            }
+            return lhs.index > rhs.index
+        }
 }
 
 final class CameraController: NSObject, ObservableObject {
@@ -341,7 +381,7 @@ final class CameraController: NSObject, ObservableObject {
         }
 
         if connection.isVideoOrientationSupported {
-            connection.videoOrientation = .portrait
+            connection.videoOrientation = .landscapeRight
         }
 
         if connection.isVideoMirroringSupported {
@@ -363,33 +403,37 @@ final class CameraController: NSObject, ObservableObject {
         fps: Int32,
         to device: AVCaptureDevice
     ) -> Bool {
-        let requestedFps = Double(fps)
         let dimensions = resolution.dimensions
+        let descriptors = device.formats.enumerated().flatMap { index, format in
+            let value = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+            return format.videoSupportedFrameRateRanges.map { range in
+                CaptureFormatDescriptor(
+                    index: index,
+                    width: value.width,
+                    height: value.height,
+                    minimumFrameRate: range.minFrameRate,
+                    maximumFrameRate: range.maxFrameRate,
+                    isFullRangeNV12:
+                        CMFormatDescriptionGetMediaSubType(format.formatDescription)
+                            == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
+                    isBinned: format.isVideoBinned
+                )
+            }
+        }
         guard
             fps > 0,
-            let format = device.formats
-                .filter({ format in
-                    let formatDimensions = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
-                    return
-                        formatDimensions.width == dimensions.width
-                        && formatDimensions.height == dimensions.height
-                        && format.videoSupportedFrameRateRanges.contains(where: { range in
-                            range.minFrameRate <= requestedFps && requestedFps <= range.maxFrameRate
-                        })
-                })
-                .max(by: { lhs, rhs in
-                    let lhsMaximum = lhs.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 0
-                    let rhsMaximum = rhs.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 0
-                    return lhsMaximum < rhsMaximum
-                })
-        else {
-            return false
-        }
+            let selected = selectCaptureFormat(
+                from: descriptors,
+                width: dimensions.width,
+                height: dimensions.height,
+                fps: fps
+            )
+        else { return false }
+        let format = device.formats[selected.index]
 
         do {
             try device.lockForConfiguration()
             defer { device.unlockForConfiguration() }
-
             device.activeFormat = format
             let frameDuration = CMTime(value: 1, timescale: fps)
             device.activeVideoMinFrameDuration = frameDuration
@@ -398,6 +442,24 @@ final class CameraController: NSObject, ObservableObject {
         } catch {
             return false
         }
+    }
+
+    func supportedCaptureProfiles(
+        position: AVCaptureDevice.Position = .back
+    ) -> Set<CaptureProfile> {
+        guard let device = Self.cameraDevice(for: position) else { return [] }
+        return Set(device.formats.flatMap { format -> [CaptureProfile] in
+            let dimensions = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+            guard let resolution = CaptureResolution.allCases.first(where: {
+                let value = $0.dimensions
+                return value.width == dimensions.width && value.height == dimensions.height
+            }) else { return [] }
+            return [15, 30, 60].compactMap { fps in
+                format.videoSupportedFrameRateRanges.contains {
+                    $0.minFrameRate <= Double(fps) && Double(fps) <= $0.maxFrameRate
+                } ? CaptureProfile(resolution: resolution, fps: Int32(fps)) : nil
+            }
+        })
     }
 
     private func registerSessionObserversIfNeeded() {
@@ -483,6 +545,12 @@ extension CameraController: AVCaptureVideoDataOutputSampleBufferDelegate {
         didOutput sampleBuffer: CMSampleBuffer,
         from connection: AVCaptureConnection
     ) {
+        guard let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        let size = CVImageBufferGetEncodedSize(imageBuffer)
+        let expected = configuredResolution.dimensions
+        guard Int32(size.width) == expected.width, Int32(size.height) == expected.height else {
+            return
+        }
         onSampleBuffer?(sampleBuffer)
     }
 }

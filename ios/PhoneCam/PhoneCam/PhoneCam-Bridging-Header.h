@@ -5,14 +5,22 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// Raw frame path ABI (shared with Android):
-void phonecam_send_video_frame(const uint8_t *data, size_t len, uint64_t pts, bool is_keyframe);
-bool phonecam_transport_init(const char *host, uint16_t port);
+// Typed profile/frame ABI shared with Android.
+bool phonecam_send_video_frame(const uint8_t *data, size_t len, uint64_t pts,
+                               uint8_t codec, uint16_t width, uint16_t height,
+                               bool is_keyframe);
+bool phonecam_transport_init(const char *host, uint16_t port,
+                             const char *video_config_json);
 void phonecam_transport_shutdown(void);
 bool phonecam_transport_is_connected(void);
-int8_t phonecam_poll_switch_camera_command(void);
-uint64_t phonecam_poll_control_command(void);
-void phonecam_set_video_dimensions(uint16_t width, uint16_t height);
+char *phonecam_poll_control_command_json(void);
+bool phonecam_peer_supports_profile(uint8_t codec, uint16_t width,
+                                    uint16_t height, uint8_t fps);
+bool phonecam_update_video_capabilities(const char *profiles_json);
+bool phonecam_report_stream_configuration(uint32_t request_id,
+                                          uint8_t result_code, uint8_t codec,
+                                          uint16_t width, uint16_t height,
+                                          uint8_t fps);
 char *phonecam_parse_qr_code_uri(const char *uri);
 char *phonecam_discover_desktops(uint32_t timeout_ms);
 

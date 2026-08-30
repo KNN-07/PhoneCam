@@ -6,7 +6,8 @@ let lastAppliedStreamSettings = null;
 
 const DEFAULT_SETTINGS = {
   resolution: "1280x720",
-  fps: "30"
+  fps: "30",
+  codec: "h264"
 };
 
 function loadSettings() {
@@ -16,9 +17,11 @@ function loadSettings() {
     
     const resSelect = document.getElementById("resolution-select");
     const fpsSelect = document.getElementById("fps-select");
-    
-    if (resSelect) resSelect.value = settings.resolution;
-    if (fpsSelect) fpsSelect.value = settings.fps;
+    const codecSelect = document.getElementById("codec-select");
+
+    if (resSelect) resSelect.value = settings.resolution || DEFAULT_SETTINGS.resolution;
+    if (fpsSelect) fpsSelect.value = settings.fps || DEFAULT_SETTINGS.fps;
+    if (codecSelect) codecSelect.value = settings.codec || DEFAULT_SETTINGS.codec;
     
     console.log("Settings loaded:", settings);
   } catch (e) {
@@ -30,7 +33,8 @@ function saveSettings() {
   try {
     const settings = {
       resolution: document.getElementById("resolution-select").value,
-      fps: document.getElementById("fps-select").value
+      fps: document.getElementById("fps-select").value,
+      codec: document.getElementById("codec-select").value
     };
     localStorage.setItem("phonecam_settings", JSON.stringify(settings));
     console.log("Settings saved:", settings);
@@ -46,26 +50,58 @@ function readStreamSettings() {
     .split("x")
     .map(Number);
   const fps = Number(document.getElementById("fps-select").value);
-  return { width, height, fps };
+  const codec = document.getElementById("codec-select").value;
+  return { width, height, fps, codec };
+}
+
+function profileLabel(profile) {
+  if (!profile) return "Active: waiting for phone";
+  const codec = profile.codec === "hevc" ? "HEVC" : "H.264";
+  return `Active: ${codec} · ${profile.width}×${profile.height} · ${profile.fps} FPS`;
+}
+
+function showActiveProfile(profile) {
+  const summary = document.getElementById("active-profile");
+  if (summary) summary.textContent = profileLabel(profile);
+}
+
+function restoreControlsFromActiveProfile() {
+  const profile = currentStatus.active_profile;
+  if (!profile) return;
+  document.getElementById("resolution-select").value = `${profile.width}x${profile.height}`;
+  document.getElementById("fps-select").value = String(profile.fps);
+  document.getElementById("codec-select").value = profile.codec;
+  saveSettings();
 }
 
 async function applyStreamSettings() {
   if (!currentStatus.connected) return;
 
   const settings = readStreamSettings();
-  const settingsKey = `${settings.width}x${settings.height}@${settings.fps}`;
+  const settingsKey = `${settings.codec}:${settings.width}x${settings.height}@${settings.fps}`;
+  const profiles = currentStatus.supported_profiles || [];
+  const tupleAdvertised = profiles.some((profile) =>
+    profile.width === settings.width &&
+    profile.height === settings.height &&
+    profile.fps === settings.fps &&
+    (settings.codec === "auto" || profile.codec === settings.codec)
+  );
+  if (profiles.length > 0 && !tupleAdvertised) return;
   if (settingsKey === lastAppliedStreamSettings) return;
 
-  await invoke("configure_stream", settings);
+  const applied = await invoke("configure_stream", settings);
   lastAppliedStreamSettings = settingsKey;
+  currentStatus.active_profile = applied;
+  showActiveProfile(applied);
 }
 
 async function handleSettingsChange() {
   saveSettings();
-  lastAppliedStreamSettings = null;
+  updateStreamControlAvailability();
   try {
     await applyStreamSettings();
   } catch (e) {
+    restoreControlsFromActiveProfile();
     alert("Unable to update stream settings: " + e);
   }
 }
@@ -86,6 +122,41 @@ function updateCameraControlUi() {
   }
 }
 
+function updateStreamControlAvailability() {
+  const profiles = currentStatus.supported_profiles || [];
+  if (!currentStatus.connected || profiles.length === 0) {
+    document.querySelectorAll("#resolution-select option, #fps-select option, #codec-select option")
+      .forEach((option) => { option.disabled = false; });
+    return;
+  }
+  const settings = readStreamSettings();
+  const supportsCodec = (profile, preference) =>
+    preference === "auto" || profile.codec === preference;
+
+  document.querySelectorAll("#resolution-select option").forEach((option) => {
+    const [width, height] = option.value.split("x").map(Number);
+    option.disabled = !profiles.some((profile) =>
+      profile.width === width && profile.height === height
+    );
+  });
+  document.querySelectorAll("#fps-select option").forEach((option) => {
+    const fps = Number(option.value);
+    option.disabled = !profiles.some((profile) =>
+      profile.width === settings.width &&
+      profile.height === settings.height &&
+      profile.fps === fps
+    );
+  });
+  document.querySelectorAll("#codec-select option").forEach((option) => {
+    option.disabled = !profiles.some((profile) =>
+      profile.width === settings.width &&
+      profile.height === settings.height &&
+      profile.fps === settings.fps &&
+      supportsCodec(profile, option.value)
+    );
+  });
+}
+
 async function updateStatus() {
   try {
     const status = await invoke("get_status");
@@ -101,14 +172,16 @@ async function updateStatus() {
     let displayState = status.state || (status.connected ? "Connected" : "Disconnected");
     
     textEl.textContent = displayState;
+    showActiveProfile(status.active_profile);
+    updateStreamControlAvailability();
 
     if (status.connected) {
       statusEl.classList.add("connected");
       statusEl.classList.remove("disconnected");
       dotEl.style.backgroundColor = "var(--secondary-color)";
       
-      const settingsFps = document.getElementById("fps-select").value;
-      fpsEl.textContent = `${settingsFps} FPS (Target)`; 
+      const activeFps = status.active_profile?.fps;
+      fpsEl.textContent = activeFps ? `${activeFps} FPS` : "Negotiating";
       fpsEl.style.display = "inline";
 
       connectBtn.disabled = true;
@@ -252,6 +325,7 @@ window.addEventListener("DOMContentLoaded", () => {
   const switchCameraBtn = document.getElementById("switch-camera-btn");
   const resolutionSelect = document.getElementById("resolution-select");
   const fpsSelect = document.getElementById("fps-select");
+  const codecSelect = document.getElementById("codec-select");
   
   if (connectBtn) connectBtn.addEventListener("click", startWifiReceiver);
   if (usbConnectBtn) usbConnectBtn.addEventListener("click", startUsbReceiver);
@@ -263,6 +337,7 @@ window.addEventListener("DOMContentLoaded", () => {
   if (resolutionSelect) resolutionSelect.addEventListener("change", handleSettingsChange);
   if (fpsSelect) fpsSelect.addEventListener("change", handleSettingsChange);
   
+  if (codecSelect) codecSelect.addEventListener("change", handleSettingsChange);
   setInterval(updateStatus, 1000);
   
   updateCameraControlUi();

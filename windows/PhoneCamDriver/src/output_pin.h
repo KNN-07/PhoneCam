@@ -108,11 +108,9 @@ class PhoneCamOutputPin final : public IPin,
     std::thread streaming_thread_;
     std::atomic<bool> streaming_;
     std::atomic<bool> stop_requested_;
-    std::uint64_t last_frame_sequence_;
     PhoneCamFrame last_frame_;
     bool has_last_frame_;
-    REFERENCE_TIME stream_start_;
-    LONG frame_index_;
+    REFERENCE_TIME next_sample_time_;
 };
 
 #else

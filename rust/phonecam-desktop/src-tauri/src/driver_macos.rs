@@ -1,10 +1,11 @@
 #[cfg(target_os = "macos")]
 use std::{
     ffi::{c_char, c_void, CStr, CString},
-    io::{self, ErrorKind, Write},
+    io::{self, ErrorKind, Read, Write},
     net::Shutdown,
     os::unix::net::UnixStream,
     path::PathBuf,
+    time::Duration,
 };
 
 #[cfg(target_os = "macos")]
@@ -80,6 +81,21 @@ impl MacOsDriver {
         stream.write_all(nv12_data)?;
 
         Ok(())
+    }
+
+    pub fn read_format_event(&mut self) -> io::Result<[u8; 16]> {
+        let stream = self.stream.as_mut().ok_or_else(|| {
+            io::Error::new(
+                ErrorKind::NotConnected,
+                "CMIO extension IPC socket is not connected",
+            )
+        })?;
+        stream.set_read_timeout(Some(Duration::from_secs(1)))?;
+        let mut event = [0u8; 16];
+        let result = stream.read_exact(&mut event);
+        let reset_result = stream.set_read_timeout(None);
+        result.and(reset_result)?;
+        Ok(event)
     }
 
     pub fn disconnect(&mut self) {

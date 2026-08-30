@@ -71,6 +71,18 @@ struct ContentView: View {
                     }
                     .pickerStyle(.segmented)
 
+                    Picker(
+                        "Codec",
+                        selection: Binding(
+                            get: { streamManager.selectedCodec },
+                            set: { streamManager.setCodec($0) }
+                        )
+                    ) {
+                        Text("H.264").tag(VideoCodec.h264)
+                        Text("HEVC").tag(VideoCodec.hevc)
+                    }
+                    .pickerStyle(.segmented)
+
                     Button {
                         streamManager.discoverDesktops()
                     } label: {

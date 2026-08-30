@@ -13,6 +13,8 @@ const FRAME_HEADER_SIZE: usize = 16;
 const PIPE_WAIT_TIMEOUT_MS: u32 = 1_000;
 
 #[cfg(target_os = "windows")]
+const GENERIC_READ: u32 = 0x8000_0000;
+#[cfg(target_os = "windows")]
 const GENERIC_WRITE: u32 = 0x4000_0000;
 #[cfg(target_os = "windows")]
 const FILE_SHARE_READ: u32 = 0x0000_0001;
@@ -96,6 +98,18 @@ impl WindowsDriver {
         Ok(())
     }
 
+    pub fn read_format_event(&self) -> io::Result<[u8; 16]> {
+        let pipe = self.pipe.as_ref().ok_or_else(|| {
+            io::Error::new(
+                ErrorKind::NotConnected,
+                "DirectShow named pipe is not connected",
+            )
+        })?;
+        let mut event = [0u8; 16];
+        read_exact_from_pipe(pipe, &mut event)?;
+        Ok(event)
+    }
+
     pub fn disconnect(&mut self) {
         self.pipe = None;
     }
@@ -144,7 +158,7 @@ fn connect_named_pipe(pipe_name: &[u16]) -> io::Result<PipeHandle> {
     let mut handle = unsafe {
         CreateFileW(
             pipe_name.as_ptr(),
-            GENERIC_WRITE,
+            GENERIC_READ | GENERIC_WRITE,
             FILE_SHARE_READ | FILE_SHARE_WRITE,
             null_mut(),
             OPEN_EXISTING,
@@ -180,7 +194,7 @@ fn connect_named_pipe(pipe_name: &[u16]) -> io::Result<PipeHandle> {
     handle = unsafe {
         CreateFileW(
             pipe_name.as_ptr(),
-            GENERIC_WRITE,
+            GENERIC_READ | GENERIC_WRITE,
             FILE_SHARE_READ | FILE_SHARE_WRITE,
             null_mut(),
             OPEN_EXISTING,
@@ -254,6 +268,33 @@ fn write_all_to_pipe(pipe: &PipeHandle, mut bytes: &[u8]) -> io::Result<()> {
 }
 
 #[cfg(target_os = "windows")]
+fn read_exact_from_pipe(pipe: &PipeHandle, mut bytes: &mut [u8]) -> io::Result<()> {
+    while !bytes.is_empty() {
+        let mut bytes_read = 0u32;
+        let read_ok = unsafe {
+            ReadFile(
+                pipe.handle,
+                bytes.as_mut_ptr().cast(),
+                u32::try_from(bytes.len()).unwrap_or(u32::MAX),
+                &mut bytes_read,
+                null_mut(),
+            )
+        };
+        if read_ok == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if bytes_read == 0 {
+            return Err(io::Error::new(
+                ErrorKind::UnexpectedEof,
+                "DirectShow named pipe closed while reading format event",
+            ));
+        }
+        let consumed = bytes_read as usize;
+        bytes = &mut bytes[consumed..];
+    }
+    Ok(())
+}
+
 struct PipeHandle {
     handle: Handle,
 }
@@ -288,6 +329,13 @@ extern "system" {
         template_file: Handle,
     ) -> Handle;
     fn WaitNamedPipeW(named_pipe_name: *const u16, timeout_ms: u32) -> i32;
+    fn ReadFile(
+        file: Handle,
+        buffer: *mut c_void,
+        bytes_to_read: u32,
+        bytes_read: *mut u32,
+        overlapped: *mut c_void,
+    ) -> i32;
     fn WriteFile(
         file: Handle,
         buffer: *const c_void,

@@ -1,5 +1,6 @@
 use std::net::{SocketAddr, ToSocketAddrs};
 
+use phonecam_protocol::Handshake;
 use tokio::{net::TcpListener, sync::watch};
 
 use crate::{
@@ -9,10 +10,15 @@ use crate::{
 
 pub struct PhoneCamServer {
     listener: TcpListener,
+    local_handshake: Handshake,
 }
 
 impl PhoneCamServer {
-    pub async fn bind<A: ToSocketAddrs>(addr: A) -> Result<Self, TransportError> {
+    pub async fn bind<A: ToSocketAddrs>(
+        addr: A,
+        local_handshake: Handshake,
+    ) -> Result<Self, TransportError> {
+        local_handshake.validate()?;
         let mut addrs = addr.to_socket_addrs()?;
         let target = addrs.next().ok_or_else(|| {
             TransportError::Io(std::io::Error::new(
@@ -22,7 +28,10 @@ impl PhoneCamServer {
         })?;
 
         let listener = TcpListener::bind(target).await?;
-        Ok(Self { listener })
+        Ok(Self {
+            listener,
+            local_handshake,
+        })
     }
 
     pub fn local_addr(&self) -> Result<SocketAddr, TransportError> {
@@ -34,6 +43,6 @@ impl PhoneCamServer {
         stream.set_nodelay(true)?;
 
         let (state_tx, state_rx) = watch::channel(ConnectionState::Handshaking);
-        build_connection(stream, state_tx, state_rx, "server").await
+        build_connection(stream, state_tx, state_rx, self.local_handshake.clone()).await
     }
 }

@@ -37,6 +37,7 @@ final class IPCReceiver {
     private var serverReadSource: DispatchSourceRead?
     private var socketURL: URL?
     private var clients: [Int32: IPCClientConnection] = [:]
+    private var latestFormatEvent: Data?
 
     init(appGroupIdentifier: String) {
         self.appGroupIdentifier = appGroupIdentifier
@@ -122,6 +123,23 @@ final class IPCReceiver {
         serverSource.resume()
     }
 
+    func publishFormat(width: Int32, height: Int32, fps: UInt8) {
+        queue.async {
+            var bytes = Data("PCFM".utf8)
+            var littleWidth = UInt32(bitPattern: width).littleEndian
+            var littleHeight = UInt32(bitPattern: height).littleEndian
+            withUnsafeBytes(of: &littleWidth) { bytes.append(contentsOf: $0) }
+            withUnsafeBytes(of: &littleHeight) { bytes.append(contentsOf: $0) }
+            bytes.append(fps)
+            bytes.append(0) // NV12
+            bytes.append(contentsOf: [0, 0])
+            self.latestFormatEvent = bytes
+            for client in self.clients.values {
+                self.sendFormatEvent(bytes, to: client)
+            }
+        }
+    }
+
     func stop() {
         queue.async {
             self.clients.values.forEach { client in
@@ -184,6 +202,20 @@ final class IPCReceiver {
 
         clients[fileDescriptor] = client
         readSource.resume()
+        if let latestFormatEvent {
+            sendFormatEvent(latestFormatEvent, to: client)
+        }
+    }
+
+    private func sendFormatEvent(_ data: Data, to client: IPCClientConnection) {
+        let written = data.withUnsafeBytes { rawBuffer -> ssize_t in
+            guard let baseAddress = rawBuffer.baseAddress else { return -1 }
+            return send(client.fileDescriptor, baseAddress, rawBuffer.count, 0)
+        }
+        if written != data.count {
+            logger.error("IPC format event write failed, errno=\(errno)")
+            closeClient(fileDescriptor: client.fileDescriptor)
+        }
     }
 
     private func readFromClient(_ client: IPCClientConnection) {
@@ -386,21 +418,25 @@ final class IPCReceiver {
     }
 
     private static func nv12PayloadSize(width: Int, height: Int) -> Int? {
-        guard width > 0, height > 0 else {
-            return nil
-        }
-
-        guard width % 2 == 0, height % 2 == 0 else {
-            return nil
-        }
-
+        let legalDimensions: Set<FrameDimensions> = [
+            FrameDimensions(width: 640, height: 480),
+            FrameDimensions(width: 1280, height: 720),
+            FrameDimensions(width: 1920, height: 1080),
+            FrameDimensions(width: 2560, height: 1440),
+            FrameDimensions(width: 3840, height: 2160),
+        ]
+        guard
+            width % 2 == 0,
+            height % 2 == 0,
+            legalDimensions.contains(FrameDimensions(width: width, height: height))
+        else { return nil }
         let lumaSamples = Int64(width) * Int64(height)
-        let totalSamples = lumaSamples + (lumaSamples / 2)
-
-        guard totalSamples > 0, totalSamples <= Int64(Int.max) else {
-            return nil
-        }
-
+        let totalSamples = lumaSamples + lumaSamples / 2
+        guard
+            totalSamples > 0,
+            totalSamples <= 12_441_600,
+            totalSamples <= Int64(Int.max)
+        else { return nil }
         return Int(totalSamples)
     }
 
@@ -429,6 +465,11 @@ final class IPCReceiver {
             | (UInt64(data[offset + 6]) << 48)
             | (UInt64(data[offset + 7]) << 56)
     }
+}
+
+private struct FrameDimensions: Hashable {
+    let width: Int
+    let height: Int
 }
 
 private final class IPCClientConnection {

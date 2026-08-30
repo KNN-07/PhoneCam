@@ -117,7 +117,7 @@ final class PhoneCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
         label: "com.phonecam.driver.cameraextension.output",
         qos: .userInteractive
     )
-    private let frameBufferQueue = FrameBufferQueue(capacity: 8)
+    private let frameBufferQueue = FrameBufferQueue(capacity: 1)
     private let ipcReceiver: IPCReceiver
 
     private var streamSource: PhoneCamStreamSource!
@@ -152,7 +152,7 @@ final class PhoneCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
         }
 
         ipcReceiver.onSampleBuffer = { [weak self] sampleBuffer in
-            self?.frameBufferQueue.enqueue(sampleBuffer)
+            self?.accept(sampleBuffer)
         }
 
         do {
@@ -160,8 +160,10 @@ final class PhoneCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
         } catch {
             logger.error("Failed to start IPC receiver: \(String(describing: error), privacy: .public)")
         }
+        outputQueue.async {
+            self.publishActiveFormatLocked()
+        }
     }
-
     deinit {
         streamTimer?.cancel()
         ipcReceiver.stop()
@@ -189,6 +191,34 @@ final class PhoneCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
 
     func setDeviceProperties(_ deviceProperties: CMIOExtensionDeviceProperties) throws {
         _ = deviceProperties
+    }
+
+    func activeFormatDidChange() {
+        outputQueue.async {
+            self.frameBufferQueue.removeAll()
+            self.lastDeliveredBuffer = nil
+            self.publishActiveFormatLocked()
+        }
+    }
+
+    private func accept(_ sampleBuffer: CMSampleBuffer) {
+        outputQueue.async {
+            guard
+                self.streamSource.formats.indices.contains(self.streamSource.activeFormatIndex),
+                let incoming = CMSampleBufferGetFormatDescription(sampleBuffer)
+            else { return }
+            let selected =
+                self.streamSource.formats[self.streamSource.activeFormatIndex].formatDescription
+            let incomingDimensions = CMVideoFormatDescriptionGetDimensions(incoming)
+            let selectedDimensions = CMVideoFormatDescriptionGetDimensions(selected)
+            guard
+                incomingDimensions.width == selectedDimensions.width,
+                incomingDimensions.height == selectedDimensions.height,
+                CMFormatDescriptionGetMediaSubType(incoming)
+                    == CMFormatDescriptionGetMediaSubType(selected)
+            else { return }
+            self.frameBufferQueue.enqueue(sampleBuffer)
+        }
     }
 
     func startStreaming() {
@@ -229,6 +259,7 @@ final class PhoneCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
             }
 
             self.frameDuration = newFrameDuration
+            self.publishActiveFormatLocked()
 
             guard self.streamingClientCount > 0 else {
                 return
@@ -236,6 +267,14 @@ final class PhoneCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
 
             self.rebuildStreamTimerLocked()
         }
+    }
+
+    private func publishActiveFormatLocked() {
+        guard streamSource.formats.indices.contains(streamSource.activeFormatIndex) else { return }
+        let format = streamSource.formats[streamSource.activeFormatIndex].formatDescription
+        let dimensions = CMVideoFormatDescriptionGetDimensions(format)
+        let fps = UInt8(clamping: Int((1.0 / frameDuration.seconds).rounded()))
+        ipcReceiver.publishFormat(width: dimensions.width, height: dimensions.height, fps: fps)
     }
 
     private func rebuildStreamTimerLocked() {
@@ -294,6 +333,8 @@ final class PhoneCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
             CMVideoDimensions(width: 640, height: 480),
             CMVideoDimensions(width: 1280, height: 720),
             CMVideoDimensions(width: 1920, height: 1080),
+            CMVideoDimensions(width: 2560, height: 1440),
+            CMVideoDimensions(width: 3840, height: 2160),
         ]
 
         return dimensions.map { dimensions in
@@ -311,11 +352,14 @@ final class PhoneCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
                 fatalError("Failed to create (dimensions.width)x(dimensions.height) stream format")
             }
 
+            let frameDurations = [15, 30, 60].map {
+                NSValue(time: CMTime(value: 1, timescale: Int32($0)))
+            }
             return CMIOExtensionStreamFormat(
                 formatDescription: formatDescription,
                 maxFrameDuration: CMTime(value: 1, timescale: 15),
                 minFrameDuration: CMTime(value: 1, timescale: 60),
-                validFrameDurations: nil
+                validFrameDurations: frameDurations
             )
         }
     }

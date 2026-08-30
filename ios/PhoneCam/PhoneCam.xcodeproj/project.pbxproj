@@ -12,8 +12,9 @@
 		A1B2C3D4E5F6010000000003 /* phonecam_mobile_core.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6020000000006 /* phonecam_mobile_core.swift */; };
 		A1B2C3D4E5F6010000000004 /* QRScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6020000000009 /* QRScannerView.swift */; };
 		A1B2C3D4E5F6010000000005 /* CameraController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6020000000010 /* CameraController.swift */; };
-		A1B2C3D4E5F6010000000006 /* H264Encoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6020000000011 /* H264Encoder.swift */; };
+		A1B2C3D4E5F6010000000006 /* VideoEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6020000000011 /* VideoEncoder.swift */; };
 		A1B2C3D4E5F6010000000007 /* StreamManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6020000000012 /* StreamManager.swift */; };
+		A1B2C3D4E5F6010000000008 /* PhoneCamTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6020000000021 /* PhoneCamTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -27,12 +28,21 @@
 		A1B2C3D4E5F6020000000008 /* phonecam_mobile_coreFFI.modulemap */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.module-map; path = phonecam_mobile_coreFFI.modulemap; sourceTree = "<group>"; };
 		A1B2C3D4E5F6020000000009 /* QRScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRScannerView.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F6020000000010 /* CameraController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraController.swift; sourceTree = "<group>"; };
-		A1B2C3D4E5F6020000000011 /* H264Encoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = H264Encoder.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F6020000000011 /* VideoEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoEncoder.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F6020000000012 /* StreamManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamManager.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F6020000000020 /* PhoneCamTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PhoneCamTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A1B2C3D4E5F6020000000021 /* PhoneCamTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneCamTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		A1B2C3D4E5F6030000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A1B2C3D4E5F6030000000002 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -47,6 +57,7 @@
 			children = (
 				A1B2C3D4E5F6040000000003 /* PhoneCam */,
 				A1B2C3D4E5F6040000000002 /* Products */,
+				A1B2C3D4E5F6040000000005 /* PhoneCamTests */,
 			);
 			sourceTree = "<group>";
 		};
@@ -54,6 +65,7 @@
 			isa = PBXGroup;
 			children = (
 				A1B2C3D4E5F6020000000001 /* PhoneCam.app */,
+				A1B2C3D4E5F6020000000020 /* PhoneCamTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -63,7 +75,7 @@
 			children = (
 				A1B2C3D4E5F6020000000010 /* CameraController.swift */,
 				A1B2C3D4E5F6020000000002 /* ContentView.swift */,
-				A1B2C3D4E5F6020000000011 /* H264Encoder.swift */,
+				A1B2C3D4E5F6020000000011 /* VideoEncoder.swift */,
 				A1B2C3D4E5F6020000000009 /* QRScannerView.swift */,
 				A1B2C3D4E5F6020000000012 /* StreamManager.swift */,
 				A1B2C3D4E5F6020000000003 /* PhoneCamApp.swift */,
@@ -82,6 +94,14 @@
 				A1B2C3D4E5F6020000000008 /* phonecam_mobile_coreFFI.modulemap */,
 			);
 			path = Generated;
+			sourceTree = "<group>";
+		};
+		A1B2C3D4E5F6040000000005 /* PhoneCamTests */ = {
+			isa = PBXGroup;
+			children = (
+				A1B2C3D4E5F6020000000021 /* PhoneCamTests.swift */,
+			);
+			path = PhoneCamTests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -104,6 +124,24 @@
 			productReference = A1B2C3D4E5F6020000000001 /* PhoneCam.app */;
 			productType = "com.apple.product-type.application";
 		};
+		A1B2C3D4E5F6050000000002 /* PhoneCamTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A1B2C3D4E5F60A0000000003 /* Build configuration list for PBXNativeTarget "PhoneCamTests" */;
+			buildPhases = (
+				A1B2C3D4E5F6080000000002 /* Sources */,
+				A1B2C3D4E5F6030000000002 /* Frameworks */,
+				A1B2C3D4E5F6070000000002 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A1B2C3D4E5F60C0000000001 /* PBXTargetDependency */,
+			);
+			name = PhoneCamTests;
+			productName = PhoneCamTests;
+			productReference = A1B2C3D4E5F6020000000020 /* PhoneCamTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -116,6 +154,10 @@
 				TargetAttributes = {
 					A1B2C3D4E5F6050000000001 = {
 						CreatedOnToolsVersion = 16.0;
+					};
+					A1B2C3D4E5F6050000000002 = {
+						CreatedOnToolsVersion = 16.0;
+						TestTargetID = A1B2C3D4E5F6050000000001;
 					};
 				};
 			};
@@ -133,12 +175,20 @@
 			projectRoot = "";
 			targets = (
 				A1B2C3D4E5F6050000000001 /* PhoneCam */,
+				A1B2C3D4E5F6050000000002 /* PhoneCamTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		A1B2C3D4E5F6070000000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A1B2C3D4E5F6070000000002 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -154,11 +204,19 @@
 			files = (
 				A1B2C3D4E5F6010000000005 /* CameraController.swift in Sources */,
 				A1B2C3D4E5F6010000000001 /* ContentView.swift in Sources */,
-				A1B2C3D4E5F6010000000006 /* H264Encoder.swift in Sources */,
+				A1B2C3D4E5F6010000000006 /* VideoEncoder.swift in Sources */,
 				A1B2C3D4E5F6010000000004 /* QRScannerView.swift in Sources */,
 				A1B2C3D4E5F6010000000007 /* StreamManager.swift in Sources */,
 				A1B2C3D4E5F6010000000002 /* PhoneCamApp.swift in Sources */,
 				A1B2C3D4E5F6010000000003 /* phonecam_mobile_core.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A1B2C3D4E5F6080000000002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A1B2C3D4E5F6010000000008 /* PhoneCamTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -325,6 +383,38 @@
 			};
 			name = Release;
 		};
+		A1B2C3D4E5F6090000000005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGNING_ALLOWED = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.phonecam.ios.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PhoneCam.app/PhoneCam";
+			};
+			name = Debug;
+		};
+		A1B2C3D4E5F6090000000006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGNING_ALLOWED = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.phonecam.ios.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PhoneCam.app/PhoneCam";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -346,7 +436,34 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
+		A1B2C3D4E5F60A0000000003 /* Build configuration list for PBXNativeTarget "PhoneCamTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1B2C3D4E5F6090000000005 /* Debug */,
+				A1B2C3D4E5F6090000000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
+/* Begin PBXContainerItemProxy section */
+		A1B2C3D4E5F60B0000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A1B2C3D4E5F6060000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A1B2C3D4E5F6050000000001;
+			remoteInfo = PhoneCam;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXTargetDependency section */
+		A1B2C3D4E5F60C0000000001 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A1B2C3D4E5F6050000000001 /* PhoneCam */;
+			targetProxy = A1B2C3D4E5F60B0000000001 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 	};
 	rootObject = A1B2C3D4E5F6060000000001 /* Project object */;
 }

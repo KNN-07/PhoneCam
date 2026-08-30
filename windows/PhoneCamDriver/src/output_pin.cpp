@@ -5,13 +5,17 @@
 #include "filter.h"
 #include "frame_receiver.h"
 #include "guids.h"
+#include "stream_formats.h"
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <atomic>
 #include <cstring>
 #include <limits>
 #include <new>
+#include <thread>
+#include <utility>
 
 #include <dvdmedia.h>
 #include <ksmedia.h>
@@ -23,10 +27,11 @@
 namespace {
 
 constexpr REFERENCE_TIME kDefaultFrameDuration = 333333;
-constexpr std::array<REFERENCE_TIME, 3> kSupportedFrameDurations = {666667, 333333, 166667};
-constexpr ULONG kSupportedResolutionCount = 3;
-constexpr ULONG kSupportedFrameRateCount = static_cast<ULONG>(kSupportedFrameDurations.size());
-constexpr ULONG kSupportedMediaTypeCount = kSupportedResolutionCount * kSupportedFrameRateCount;
+constexpr auto& kSupportedFrameDurations = phonecam::kFrameDurations100ns;
+constexpr ULONG kSupportedFrameRateCount =
+    static_cast<ULONG>(phonecam::kFrameRates.size());
+constexpr ULONG kSupportedMediaTypeCount =
+    static_cast<ULONG>(phonecam::kMediaTypeCount);
 
 const GUID kMediaSubtypeYuyv = {
     MAKEFOURCC('Y', 'U', 'Y', 'V'),
@@ -38,6 +43,11 @@ void ResetMediaType(AM_MEDIA_TYPE* media_type) {
     if (media_type != nullptr) {
         ZeroMemory(media_type, sizeof(*media_type));
     }
+}
+
+std::uint8_t FrameRateForDuration(REFERENCE_TIME duration) {
+    if (duration <= 0) return 30;
+    return static_cast<std::uint8_t>((10000000 + duration / 2) / duration);
 }
 
 void ReleaseMediaType(AM_MEDIA_TYPE* media_type) {
@@ -263,10 +273,8 @@ PhoneCamOutputPin::PhoneCamOutputPin(PhoneCamFilter* filter)
       current_format_{1280, 720, MEDIASUBTYPE_NV12, kDefaultFrameDuration},
       streaming_(false),
       stop_requested_(false),
-      last_frame_sequence_(0),
       has_last_frame_(false),
-      stream_start_(0),
-      frame_index_(0) {
+      next_sample_time_(0) {
     ResetMediaType(&connected_media_type_);
     if (filter_ != nullptr) {
         filter_->AddRef();
@@ -316,9 +324,7 @@ HRESULT PhoneCamOutputPin::StartStreaming(REFERENCE_TIME stream_start) {
             return allocator_hr;
         }
 
-        stream_start_ = stream_start;
-        frame_index_ = 0;
-        last_frame_sequence_ = 0;
+        next_sample_time_ = stream_start;
         has_last_frame_ = false;
         stop_requested_.store(false, std::memory_order_release);
         streaming_.store(true, std::memory_order_release);
@@ -652,6 +658,12 @@ STDMETHODIMP PhoneCamOutputPin::SetFormat(AM_MEDIA_TYPE* pmt) {
 
     std::lock_guard<std::mutex> guard(lock_);
     current_format_ = requested;
+    has_last_frame_ = false;
+    frame_receiver_.PublishFormat(
+        static_cast<std::uint32_t>(requested.width),
+        static_cast<std::uint32_t>(requested.height),
+        FrameRateForDuration(requested.avg_time_per_frame));
+    last_frame_ = {};
 
     if (has_connected_media_type_) {
         FreeMediaType(&connected_media_type_);
@@ -761,14 +773,16 @@ STDMETHODIMP PhoneCamOutputPin::GetStreamCaps(int iIndex, AM_MEDIA_TYPE** ppmt, 
     caps->MinFrameInterval = video_info->AvgTimePerFrame;
     caps->MaxFrameInterval = video_info->AvgTimePerFrame;
 
-    const std::int64_t frames_per_second =
+    const std::uint32_t frames_per_second =
         video_info->AvgTimePerFrame > 0
-            ? (10000000 + (video_info->AvgTimePerFrame / 2)) / video_info->AvgTimePerFrame
+            ? static_cast<std::uint32_t>(
+                  (10000000 + (video_info->AvgTimePerFrame / 2)) /
+                  video_info->AvgTimePerFrame)
             : 30;
-    const std::int64_t bitrate =
-        static_cast<std::int64_t>(width) * static_cast<std::int64_t>(height) * 12 * frames_per_second;
-    const LONG safe_bitrate =
-        bitrate > std::numeric_limits<LONG>::max() ? std::numeric_limits<LONG>::max() : static_cast<LONG>(bitrate);
+    const LONG safe_bitrate = phonecam::SaturatedBitRate(
+        static_cast<std::uint32_t>(width),
+        static_cast<std::uint32_t>(height),
+        frames_per_second);
     caps->MinBitsPerSecond = safe_bitrate;
     caps->MaxBitsPerSecond = safe_bitrate;
 
@@ -922,6 +936,10 @@ HRESULT PhoneCamOutputPin::CompleteConnectionLocked(IPin* peer_pin, const AM_MED
     current_format_.subtype = media_type->subtype;
     current_format_.avg_time_per_frame =
         video_info->AvgTimePerFrame > 0 ? video_info->AvgTimePerFrame : kDefaultFrameDuration;
+    frame_receiver_.PublishFormat(
+        static_cast<std::uint32_t>(current_format_.width),
+        static_cast<std::uint32_t>(current_format_.height),
+        FrameRateForDuration(current_format_.avg_time_per_frame));
 
     hr = EnsureAllocatorLocked();
     if (FAILED(hr)) {
@@ -1038,10 +1056,9 @@ bool PhoneCamOutputPin::IsSupportedMediaType(const AM_MEDIA_TYPE* media_type) co
         return false;
     }
 
-    const bool supported_dimensions =
-        (width == 640 && height == 480) || (width == 1280 && height == 720) ||
-        (width == 1920 && height == 1080);
-    if (!supported_dimensions) {
+    if (!phonecam::IsSupportedDimensions(
+            static_cast<std::uint32_t>(width),
+            static_cast<std::uint32_t>(height))) {
         return false;
     }
 
@@ -1110,15 +1127,13 @@ HRESULT PhoneCamOutputPin::BuildMediaTypeForIndex(ULONG index, AM_MEDIA_TYPE* me
 
     const ULONG resolution_index = index / kSupportedFrameRateCount;
     const ULONG frame_rate_index = index % kSupportedFrameRateCount;
-
-    StreamFormat format{};
-    if (resolution_index == 0) {
-        format = {640, 480, MEDIASUBTYPE_NV12, kSupportedFrameDurations[frame_rate_index]};
-    } else if (resolution_index == 1) {
-        format = {1280, 720, MEDIASUBTYPE_NV12, kSupportedFrameDurations[frame_rate_index]};
-    } else {
-        format = {1920, 1080, MEDIASUBTYPE_NV12, kSupportedFrameDurations[frame_rate_index]};
-    }
+    const auto resolution = phonecam::kResolutions[resolution_index];
+    StreamFormat format{
+        static_cast<LONG>(resolution.width),
+        static_cast<LONG>(resolution.height),
+        MEDIASUBTYPE_NV12,
+        kSupportedFrameDurations[frame_rate_index],
+    };
 
     return BuildMediaType(format, media_type);
 }
@@ -1136,49 +1151,62 @@ REFERENCE_TIME PhoneCamOutputPin::FrameDurationLocked() const {
 }
 
 void PhoneCamOutputPin::StreamingLoop() {
-    std::uint64_t sequence = 0;
-
+    auto next_deadline = std::chrono::steady_clock::now();
     while (!stop_requested_.load(std::memory_order_acquire)) {
-        PhoneCamFrame frame;
-        if (!frame_receiver_.WaitForFrame(&sequence, 100, &frame)) {
-            continue;
-        }
-
         IMemAllocator* allocator = nullptr;
         IMemInputPin* sink = nullptr;
+        PhoneCamFrame frame;
         REFERENCE_TIME start = 0;
         REFERENCE_TIME stop = 0;
+        REFERENCE_TIME duration = kDefaultFrameDuration;
 
         {
             std::lock_guard<std::mutex> guard(lock_);
-            if (!streaming_.load(std::memory_order_relaxed) || allocator_ == nullptr || mem_input_pin_ == nullptr) {
+            if (!streaming_.load(std::memory_order_relaxed) ||
+                allocator_ == nullptr || mem_input_pin_ == nullptr) {
+                next_deadline = std::chrono::steady_clock::now();
                 continue;
             }
+            duration = FrameDurationLocked();
+        }
+        next_deadline = std::max(next_deadline, std::chrono::steady_clock::now());
+        next_deadline += std::chrono::nanoseconds(duration * 100);
+        std::this_thread::sleep_until(next_deadline);
+        if (stop_requested_.load(std::memory_order_acquire)) break;
 
+        PhoneCamFrame newest;
+        const bool has_newest = frame_receiver_.TryGetLatestFrame(&newest);
+        {
+            std::lock_guard<std::mutex> guard(lock_);
+            if (!streaming_.load(std::memory_order_relaxed) ||
+                allocator_ == nullptr || mem_input_pin_ == nullptr) {
+                continue;
+            }
+            if (has_newest &&
+                newest.width == static_cast<std::uint32_t>(current_format_.width) &&
+                newest.height == static_cast<std::uint32_t>(current_format_.height)) {
+                last_frame_ = std::move(newest);
+                has_last_frame_ = true;
+            }
+            if (!has_last_frame_) continue;
+            frame = last_frame_;
             allocator = allocator_;
             sink = mem_input_pin_;
             allocator->AddRef();
             sink->AddRef();
-
-            const REFERENCE_TIME duration = FrameDurationLocked();
-            start = stream_start_ + static_cast<REFERENCE_TIME>(frame_index_) * duration;
+            duration = FrameDurationLocked();
+            start = next_sample_time_;
             stop = start + duration;
-            ++frame_index_;
-
-            last_frame_ = frame;
-            has_last_frame_ = true;
-            last_frame_sequence_ = sequence;
+            next_sample_time_ = stop;
         }
 
         IMediaSample* sample = nullptr;
         const HRESULT buffer_hr = allocator->GetBuffer(&sample, &start, &stop, 0);
         allocator->Release();
-
         if (FAILED(buffer_hr) || sample == nullptr) {
             sink->Release();
             continue;
         }
-
         LONG bytes_written = 0;
         if (CopyFrameToSample(frame, sample, &bytes_written)) {
             sample->SetActualDataLength(bytes_written);
@@ -1188,7 +1216,6 @@ void PhoneCamOutputPin::StreamingLoop() {
             sample->SetDiscontinuity(FALSE);
             sink->Receive(sample);
         }
-
         sample->Release();
         sink->Release();
     }

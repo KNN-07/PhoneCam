@@ -1,6 +1,10 @@
 package com.phonecam.app
 
 import android.content.Context
+import android.graphics.ImageFormat
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
+import android.hardware.camera2.CaptureRequest
 import android.util.Log
 import android.util.Range
 import android.util.Size
@@ -9,9 +13,12 @@ import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
+import androidx.camera.camera2.interop.Camera2Interop
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.lifecycle.LifecycleOwner
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ExecutorService
@@ -106,20 +113,41 @@ class CameraController(
         onFrame: (ImageProxy) -> Unit,
     ): Boolean {
         val cameraSelector = selectCameraSelector(provider, useFrontCamera)
+        val exactResolution =
+            ResolutionSelector.Builder()
+                .setResolutionStrategy(
+                    ResolutionStrategy(
+                        targetResolution,
+                        ResolutionStrategy.FALLBACK_RULE_NONE,
+                    ),
+                )
+                .build()
+        val fpsRange = narrowestFpsRange(useFrontCamera, targetFps)
 
-        val preview =
+        val previewBuilder =
             Preview.Builder()
-                .setTargetResolution(targetResolution)
-                .setTargetFrameRate(Range(targetFps, targetFps))
+                .setResolutionSelector(exactResolution)
+        fpsRange?.let {
+            Camera2Interop.Extender(previewBuilder)
+                .setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it)
+        }
+        val preview =
+            previewBuilder
                 .build()
                 .also {
                     it.setSurfaceProvider(previewView.surfaceProvider)
                 }
 
-        val imageAnalysis =
+        val analysisBuilder =
             ImageAnalysis.Builder()
-                .setTargetResolution(targetResolution)
+                .setResolutionSelector(exactResolution)
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+        fpsRange?.let {
+            Camera2Interop.Extender(analysisBuilder)
+                .setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it)
+        }
+        val imageAnalysis =
+            analysisBuilder
                 .build()
                 .also {
                     it.setAnalyzer(analysisExecutor, onFrame)
@@ -134,6 +162,16 @@ class CameraController(
                 imageAnalysis,
             )
 
+        val boundResolution =
+            imageAnalysis.resolutionInfo?.resolution
+                ?: throw IllegalStateException("CameraX did not report the bound analysis resolution")
+        if (boundResolution != targetResolution) {
+            provider.unbindAll()
+            throw IllegalStateException(
+                "CameraX bound ${boundResolution.width}x${boundResolution.height}, expected " +
+                    "${targetResolution.width}x${targetResolution.height}",
+            )
+        }
         usingFrontCamera = cameraSelector == CameraSelector.DEFAULT_FRONT_CAMERA
         return usingFrontCamera
     }
@@ -168,6 +206,70 @@ class CameraController(
         }.onFailure {
             Log.w(TAG, "Camera availability check failed", it)
         }.getOrDefault(false)
+
+    fun discoverExactCaptureProfiles(useFrontCamera: Boolean = false): Set<Pair<StreamResolution, Int>> {
+        val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+        val desiredFacing =
+            if (useFrontCamera) {
+                CameraCharacteristics.LENS_FACING_FRONT
+            } else {
+                CameraCharacteristics.LENS_FACING_BACK
+            }
+        val cameraId =
+            cameraManager.cameraIdList.firstOrNull { id ->
+                cameraManager.getCameraCharacteristics(id)
+                    .get(CameraCharacteristics.LENS_FACING) == desiredFacing
+            } ?: return emptySet()
+        val characteristics = cameraManager.getCameraCharacteristics(cameraId)
+        val map =
+            characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+                ?: return emptySet()
+        val sizes = map.getOutputSizes(ImageFormat.YUV_420_888)?.toSet().orEmpty()
+        val fpsRanges =
+            characteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
+                ?.toList()
+                .orEmpty()
+        return buildSet {
+            for (resolution in StreamResolution.entries) {
+                val size = Size(resolution.width, resolution.height)
+                if (size !in sizes) {
+                    continue
+                }
+                val minimumDuration =
+                    map.getOutputMinFrameDuration(ImageFormat.YUV_420_888, size)
+                for (fps in listOf(15, 30, 60)) {
+                    if (
+                        fpsRanges.any { range -> range.contains(fps) } &&
+                        (minimumDuration <= 0L || minimumDuration <= 1_000_000_000L / fps)
+                    ) {
+                        add(resolution to fps)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun narrowestFpsRange(
+        useFrontCamera: Boolean,
+        targetFps: Int,
+    ): Range<Int>? {
+        val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
+        val desiredFacing =
+            if (useFrontCamera) {
+                CameraCharacteristics.LENS_FACING_FRONT
+            } else {
+                CameraCharacteristics.LENS_FACING_BACK
+            }
+        return cameraManager.cameraIdList
+            .firstOrNull { id ->
+                cameraManager.getCameraCharacteristics(id)
+                    .get(CameraCharacteristics.LENS_FACING) == desiredFacing
+            }
+            ?.let(cameraManager::getCameraCharacteristics)
+            ?.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES)
+            ?.filter { targetFps in it }
+            ?.minWithOrNull(compareBy<Range<Int>>({ it.upper - it.lower }, { it.lower }))
+    }
 
     fun stop() {
         cameraProvider?.unbindAll()

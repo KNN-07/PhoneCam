@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "PhoneCam desktop client"
 authors = ["PhoneCam Contributors"]
 edition = "2021"
-rust-version = "1.77.2"
+rust-version = "1.85"
 
 [build-dependencies]
 tauri-build = { version = "2.0.0", features = [] }
@@ -21,6 +21,8 @@ tokio = { version = "1.0", features = ["full"] }
 log = "0.4"
 env_logger = "0.10"
 openh264 = "=0.6.5"
+rust_h265 = "=0.1.0"
+crossbeam-channel = "=0.5.16"
 qrcode = "0.14"
 local-ip-address = "0.6"
 

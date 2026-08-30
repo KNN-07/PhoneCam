@@ -74,6 +74,10 @@ jobs:
           cmake -S windows/PhoneCamDriver -B build/windows-driver -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build/windows-driver
 
+      - name: Test Windows virtual camera formats
+        if: runner.os == 'Windows'
+        run: ctest --test-dir build/windows-driver --output-on-failure
+
       - name: Lint
         run: cargo clippy ${{ matrix.cargo_flags }} --all-targets --locked -- -D warnings
 
@@ -241,6 +245,15 @@ jobs:
 
       - name: Build the iOS Rust XCFramework and Swift bindings
         run: bash ios/build-xcframework.sh
+
+      - name: Test iOS profile and packet contracts
+        run: |
+          xcodebuild \
+            -project ios/PhoneCam/PhoneCam.xcodeproj \
+            -scheme PhoneCam \
+            -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
+            CODE_SIGNING_ALLOWED=NO \
+            test
 
       - name: Build iOS app
         run: |

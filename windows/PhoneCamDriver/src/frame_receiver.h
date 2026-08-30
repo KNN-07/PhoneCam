@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <mutex>
@@ -9,7 +10,6 @@
 #if defined(_WIN32)
 #include <windows.h>
 #else
-using DWORD = std::uint32_t;
 using HRESULT = long;
 constexpr HRESULT S_OK = 0;
 constexpr HRESULT S_FALSE = 1;
@@ -30,8 +30,8 @@ class FrameReceiver {
     HRESULT Start();
     void Stop();
 
-    bool WaitForFrame(std::uint64_t* last_sequence, DWORD timeout_ms, PhoneCamFrame* frame);
     bool TryGetLatestFrame(PhoneCamFrame* frame) const;
+    void PublishFormat(std::uint32_t width, std::uint32_t height, std::uint8_t fps);
 
   private:
     void ReceiverLoop();
@@ -52,6 +52,10 @@ class FrameReceiver {
     std::atomic<bool> running_;
     std::thread receiver_thread_;
 
+    mutable std::mutex pipe_mutex_;
+    void* pipe_handle_ = nullptr;
+    std::array<std::uint8_t, 16> latest_format_event_{};
+    bool has_latest_format_event_ = false;
     mutable std::mutex mutex_;
     std::vector<std::uint8_t> pending_bytes_;
 

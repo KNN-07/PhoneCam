@@ -93,15 +93,17 @@ class MainActivity : AppCompatActivity() {
                         .getIntExtra(EXTRA_ENDPOINT_PORT, DEFAULT_ENDPOINT_PORT)
                         .coerceIn(1, 65535),
                 resolution = parseResolution(intent.getStringExtra(EXTRA_RESOLUTION)),
-                bitRate =
+                bitRateOverride =
                     intent
-                        .getIntExtra(EXTRA_BITRATE, DEFAULT_BITRATE)
-                        .coerceIn(MIN_BITRATE, MAX_BITRATE),
+                        .takeIf { it.hasExtra(EXTRA_BITRATE) }
+                        ?.getIntExtra(EXTRA_BITRATE, 0)
+                        ?.takeIf { it in MIN_BITRATE_OVERRIDE..MAX_BITRATE_OVERRIDE },
                 fps =
                     intent
                         .getIntExtra(EXTRA_FPS, DEFAULT_FPS)
                         .takeIf { it in SUPPORTED_FRAME_RATES }
                         ?: DEFAULT_FPS,
+                codec = parseCodec(intent.getStringExtra(EXTRA_CODEC)),
             )
 
         streamManager = StreamManager(streamConfig, ::updateStatus)
@@ -135,6 +137,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun startCameraPipeline() {
         runCatching {
+            streamManager.registerCameraPipeline(cameraController, previewView)
             streamManager.start()
             cameraController.start(
                 previewView = previewView,
@@ -145,7 +148,6 @@ class MainActivity : AppCompatActivity() {
                     updateStatus("Camera startup failed: ${it.message ?: "unknown error"}")
                 },
             )
-            streamManager.registerCameraPipeline(cameraController, previewView)
             updateCameraState(cameraController.isUsingFrontCamera())
             val target = streamManager.targetResolution()
             updateStatus("Camera preview active (${target.width}x${target.height})")
@@ -159,7 +161,15 @@ class MainActivity : AppCompatActivity() {
         when (value?.lowercase()) {
             "480p", "sd" -> StreamResolution.SD_480P
             "1080p", "fullhd", "full_hd" -> StreamResolution.FULL_HD_1080P
+            "1440p", "qhd" -> StreamResolution.QHD_1440P
+            "2160p", "4k", "uhd" -> StreamResolution.UHD_2160P
             else -> StreamResolution.HD_720P
+        }
+
+    private fun parseCodec(value: String?): VideoCodec =
+        when (value?.lowercase()) {
+            "hevc", "h265", "h.265" -> VideoCodec.HEVC
+            else -> VideoCodec.H264
         }
 
     private fun discoverDesktops() {
@@ -219,15 +229,15 @@ class MainActivity : AppCompatActivity() {
         private const val DEFAULT_ENDPOINT_HOST = "127.0.0.1"
         private const val DEFAULT_ENDPOINT_PORT = 7878
         private const val DEFAULT_FPS = 30
-        private const val DEFAULT_BITRATE = 4_000_000
-        private const val MIN_BITRATE = 3_000_000
-        private const val MAX_BITRATE = 5_000_000
+        private const val MIN_BITRATE_OVERRIDE = 500_000
+        private const val MAX_BITRATE_OVERRIDE = 80_000_000
         private val SUPPORTED_FRAME_RATES = setOf(15, 30, 60)
 
         const val EXTRA_ENDPOINT_HOST = "phonecam.endpoint_host"
         const val EXTRA_ENDPOINT_PORT = "phonecam.endpoint_port"
         const val EXTRA_RESOLUTION = "phonecam.resolution"
         const val EXTRA_BITRATE = "phonecam.bitrate"
+        const val EXTRA_CODEC = "phonecam.codec"
         const val EXTRA_FPS = "phonecam.fps"
     }
 }

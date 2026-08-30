@@ -94,6 +94,7 @@ h2 {
 
 .setting-item {
   flex: 1;
+  min-width: 180px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -114,6 +115,28 @@ h2 {
   font-family: inherit;
   font-size: 0.9rem;
   cursor: pointer;
+}
+
+.select-field:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.select-field:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
+}
+
+.select-field:disabled,
+.select-field option:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.settings-summary {
+  margin: 0;
+  color: var(--on-surface);
+  font-size: 0.9rem;
+  opacity: 0.82;
 }
 
 .device-list-container {

@@ -1,5 +1,8 @@
 package com.phonecam.app
 
+import android.media.MediaCodecInfo
+import android.media.MediaCodecList
+import android.media.MediaFormat
 import android.util.Log
 import android.util.Size
 import androidx.camera.core.ImageProxy
@@ -8,6 +11,8 @@ import com.sun.jna.Library
 import com.sun.jna.Native
 import com.sun.jna.NativeLong
 import com.sun.jna.Pointer
+import org.json.JSONArray
+import org.json.JSONObject
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
@@ -19,14 +24,60 @@ enum class StreamResolution(
     SD_480P(width = 640, height = 480),
     HD_720P(width = 1280, height = 720),
     FULL_HD_1080P(width = 1920, height = 1080),
+    QHD_1440P(width = 2560, height = 1440),
+    UHD_2160P(width = 3840, height = 2160),
+}
+
+enum class VideoCodec(
+    val wireName: String,
+    val nativeId: Byte,
+) {
+    H264(wireName = "h264", nativeId = 0),
+    HEVC(wireName = "hevc", nativeId = 1),
+}
+
+data class StreamProfile(
+    val codec: VideoCodec,
+    val width: Int,
+    val height: Int,
+    val fps: Int,
+) {
+    fun toJson(): JSONObject =
+        JSONObject()
+            .put("codec", codec.wireName)
+            .put("width", width)
+            .put("height", height)
+            .put("fps", fps)
+
+    companion object {
+        fun fromJson(json: JSONObject): StreamProfile? {
+            val codec =
+                VideoCodec.entries.firstOrNull {
+                    it.wireName == json.optString("codec")
+                } ?: return null
+            val profile =
+                StreamProfile(
+                    codec = codec,
+                    width = json.optInt("width"),
+                    height = json.optInt("height"),
+                    fps = json.optInt("fps"),
+                )
+            return profile.takeIf {
+                StreamResolution.entries.any { resolution ->
+                    resolution.width == profile.width && resolution.height == profile.height
+                } && profile.fps in setOf(15, 30, 60)
+            }
+        }
+    }
 }
 
 data class StreamConfig(
     val endpointHost: String = "10.0.2.2",
     val endpointPort: Int = 7878,
     val resolution: StreamResolution = StreamResolution.HD_720P,
-    val bitRate: Int = 4_000_000,
+    val bitRateOverride: Int? = null,
     val fps: Int = 30,
+    val codec: VideoCodec = VideoCodec.H264,
 ) {
     val targetSize: Size
         get() = Size(resolution.width, resolution.height)
@@ -47,19 +98,36 @@ class StreamManager(
     @Volatile
     private var activeFps = config.fps
     @Volatile
-    private var encoder = createEncoder(activeResolution, activeFps)
+    private var activeCodec = config.codec
+    @Volatile
+    private var encoder = createEncoder(activeCodec, activeResolution, activeFps)
 
     private fun createEncoder(
+        codec: VideoCodec,
         resolution: StreamResolution,
         fps: Int,
     ) =
-        H264Encoder(
+        VideoEncoder(
+            codec = codec,
             width = resolution.width,
             height = resolution.height,
-            bitRate = bitrateFor(resolution),
+            bitRate = bitrateFor(codec, resolution, fps, config.bitRateOverride),
             frameRate = fps,
             onNalUnitReady = ::onNalUnit,
         )
+    private fun activeProfile(): StreamProfile =
+        StreamProfile(
+            codec = activeCodec,
+            width = activeResolution.width,
+            height = activeResolution.height,
+            fps = activeFps,
+        )
+
+    @Volatile
+    private var availableProfiles: List<StreamProfile> = listOf(activeProfile())
+
+    private fun supportedProfiles(): List<StreamProfile> = availableProfiles
+
 
     @Volatile
     private var started = false
@@ -85,6 +153,12 @@ class StreamManager(
         this.cameraController = cameraController
         this.previewView = previewView
         this.isFrontCamera = cameraController.isUsingFrontCamera()
+        availableProfiles =
+            discoverSupportedProfiles(cameraController.discoverExactCaptureProfiles())
+                .ifEmpty { listOf(activeProfile()) }
+        require(activeProfile() in availableProfiles) {
+            "Startup profile ${activeProfile()} is unsupported by the camera and hardware encoders"
+        }
         notifyCameraStateChanged(this.isFrontCamera)
     }
 
@@ -98,8 +172,13 @@ class StreamManager(
             return
         }
 
-        RustBridge.setVideoResolution(activeResolution.width, activeResolution.height)
-        val connected = RustBridge.initializeTransport(config.endpointHost, config.endpointPort)
+        val connected =
+            RustBridge.initializeTransport(
+                config.endpointHost,
+                config.endpointPort,
+                activeProfile(),
+                supportedProfiles(),
+            )
         if (!connected) {
             onStatus("Transport connection failed. Camera preview/encoding still active.")
         } else {
@@ -141,7 +220,13 @@ class StreamManager(
         }
 
         val safePort = port.coerceIn(1, 65535)
-        val connected = RustBridge.reconnectTransport(host.trim(), safePort)
+        val connected =
+            RustBridge.reconnectTransport(
+                host.trim(),
+                safePort,
+                activeProfile(),
+                supportedProfiles(),
+            )
         if (connected) {
             onStatus("Connected to transport ${host.trim()}:$safePort")
         } else {
@@ -192,7 +277,7 @@ class StreamManager(
                             is RemoteControl.SwitchCamera -> handleRemoteCameraSwitch(command.front)
                             RemoteControl.RequestKeyframe -> encoder.requestKeyFrame()
                             is RemoteControl.ConfigureStream -> {
-                                handleRemoteStreamConfiguration(command.width, command.height, command.fps)
+                                handleRemoteStreamConfiguration(command.requestId, command.profile)
                             }
                         }
                     },
@@ -299,30 +384,54 @@ class StreamManager(
     }
 
     private fun handleRemoteStreamConfiguration(
-        width: Int,
-        height: Int,
-        fps: Int,
+        requestId: Int,
+        profile: StreamProfile,
     ) {
-        val resolution = StreamResolution.entries.firstOrNull { it.width == width && it.height == height }
-        if (resolution == null || fps !in SUPPORTED_FRAME_RATES) {
-            onStatus("Desktop requested unsupported stream configuration ${width}x$height@$fps")
+        val resolution =
+            StreamResolution.entries.firstOrNull {
+                it.width == profile.width && it.height == profile.height
+            }
+        if (resolution == null ||
+            profile.fps !in SUPPORTED_FRAME_RATES ||
+            profile !in supportedProfiles()
+        ) {
+            RustBridge.reportConfiguration(requestId, RESULT_UNSUPPORTED, profile)
+            onStatus(
+                "Desktop requested unsupported stream configuration " +
+                    "${profile.codec.wireName} ${profile.width}x${profile.height}@${profile.fps}",
+            )
             return
         }
-
-        if (resolution == activeResolution && fps == activeFps) {
-            encoder.requestKeyFrame()
+        if (profile == activeProfile()) {
+            if (RustBridge.reportConfiguration(requestId, RESULT_APPLIED, profile)) {
+                encoder.requestKeyFrame()
+            }
             return
         }
-
         synchronized(cameraSwitchLock) {
             if (switchInProgress) {
+                RustBridge.reportConfiguration(requestId, RESULT_UNSUPPORTED, profile)
                 return
             }
             switchInProgress = true
         }
-
         try {
-            performRemoteStreamConfiguration(resolution, fps)
+            val applied =
+                configurationCandidates(profile, supportedProfiles())
+                    .firstNotNullOfOrNull { candidate ->
+                        candidate.takeIf { started }?.let(::performRemoteStreamConfiguration)
+                    }
+            if (applied != null) {
+                if (RustBridge.reportConfiguration(requestId, RESULT_APPLIED, applied)) {
+                    encoder.requestKeyFrame()
+                    onStatus(
+                        "Streaming ${applied.codec.wireName} " +
+                            "${applied.width}x${applied.height}@${applied.fps}",
+                    )
+                }
+            } else {
+                RustBridge.reportConfiguration(requestId, RESULT_CAPTURE_FAILED, profile)
+            }
         } finally {
             synchronized(cameraSwitchLock) {
                 switchInProgress = false
@@ -330,95 +439,145 @@ class StreamManager(
         }
     }
 
-    private fun performRemoteStreamConfiguration(
-        resolution: StreamResolution,
-        fps: Int,
-    ) {
+    private fun performRemoteStreamConfiguration(profile: StreamProfile): StreamProfile? {
         val controller = cameraController
         val preview = previewView
         if (controller == null || preview == null) {
             onStatus("Stream configuration requested before camera pipeline initialization")
-            return
+            return null
         }
-
-        val previousResolution = activeResolution
-        val previousFps = activeFps
-        runCatching { encoder.stop() }
-
+        val resolution =
+            StreamResolution.entries.firstOrNull {
+                it.width == profile.width && it.height == profile.height
+            } ?: return null
+        val previousProfile = activeProfile()
+        val previousEncoder = encoder
+        val candidate = createEncoder(profile.codec, resolution, profile.fps)
+        runCatching { previousEncoder.stop() }
         val configured =
             runCatching {
-                activeResolution = resolution
-                activeFps = fps
                 controller.switchCamera(
                     useFrontCamera = isFrontCamera,
                     previewView = preview,
-                    targetResolution = targetResolution(),
-                    targetFps = targetFps(),
+                    targetResolution = Size(profile.width, profile.height),
+                    targetFps = profile.fps,
                     onFrame = ::handleCameraFrame,
                 )
-                encoder = createEncoder(activeResolution, activeFps)
-                encoder.start()
-                encoder.requestKeyFrame()
-                RustBridge.setVideoResolution(activeResolution.width, activeResolution.height)
+                candidate.start()
             }.onFailure {
                 Log.e(TAG, "Failed to apply remote stream configuration", it)
             }.isSuccess
-
         if (configured) {
-            onStatus("Streaming ${resolution.width}x${resolution.height}@$fps")
-            return
+            activeCodec = profile.codec
+            activeResolution = resolution
+            activeFps = profile.fps
+            encoder = candidate
+            return profile
         }
 
-        activeResolution = previousResolution
-        activeFps = previousFps
-        runCatching {
-            controller.switchCamera(
-                useFrontCamera = isFrontCamera,
-                previewView = preview,
-                targetResolution = targetResolution(),
-                targetFps = targetFps(),
-                onFrame = ::handleCameraFrame,
-            )
-            encoder = createEncoder(activeResolution, activeFps)
-            encoder.start()
-            encoder.requestKeyFrame()
-            RustBridge.setVideoResolution(activeResolution.width, activeResolution.height)
+        runCatching { candidate.stop() }
+        availableProfiles = availableProfiles - profile
+        RustBridge.updateVideoCapabilities(availableProfiles)
+        val restoredResolution =
+            StreamResolution.entries.first {
+                it.width == previousProfile.width && it.height == previousProfile.height
+            }
+        val restored =
+            runCatching {
+                controller.switchCamera(
+                    useFrontCamera = isFrontCamera,
+                    previewView = preview,
+                    targetResolution = Size(previousProfile.width, previousProfile.height),
+                    targetFps = previousProfile.fps,
+                    onFrame = ::handleCameraFrame,
+                )
+                val restoredEncoder =
+                    createEncoder(
+                        previousProfile.codec,
+                        restoredResolution,
+                        previousProfile.fps,
+                    )
+                restoredEncoder.start()
+                activeCodec = previousProfile.codec
+                activeResolution = restoredResolution
+                activeFps = previousProfile.fps
+                encoder = restoredEncoder
+                encoder.requestKeyFrame()
+            }.onFailure {
+                Log.e(TAG, "Failed to restore previous stream configuration", it)
+            }.isSuccess
+        if (!restored) {
+            started = false
+            stopCameraControlPolling()
+            runCatching { controller.stop() }
+            onStatus("Terminal stream failure: unable to restore previous configuration")
+            return null
         }
         onStatus("Unable to apply stream configuration; restored previous settings")
+        return null
     }
 
-    private fun bitrateFor(resolution: StreamResolution): Int =
-        when (resolution) {
-            StreamResolution.SD_480P -> minOf(config.bitRate, 2_500_000)
-            StreamResolution.HD_720P -> config.bitRate
-            StreamResolution.FULL_HD_1080P -> maxOf(config.bitRate, 5_000_000)
-        }
+    private fun bitrateFor(
+        codec: VideoCodec,
+        resolution: StreamResolution,
+        fps: Int,
+        override: Int?,
+    ): Int {
+        val default = defaultBitrate(codec, resolution, fps)
+        return override?.coerceIn(MIN_BITRATE_OVERRIDE, MAX_BITRATE_OVERRIDE) ?: default
+    }
 
     private fun onNalUnit(
         nalUnit: ByteArray,
         ptsUs: Long,
         isKeyframe: Boolean,
     ) {
-        RustBridge.sendVideoFrame(nalUnit, ptsUs, isKeyframe)
+        val accepted = RustBridge.sendVideoFrame(nalUnit, ptsUs, activeProfile(), isKeyframe)
+        if (!accepted && isKeyframe) {
+            encoder.requestKeyFrame()
+        }
     }
 
     private interface PhoneCamRustLib : Library {
-        fun phonecam_transport_init(host: String, port: Short): Boolean
+        fun phonecam_transport_init(
+            host: String,
+            port: Short,
+            videoConfigJson: String,
+        ): Boolean
 
         fun phonecam_transport_shutdown()
-
-        fun phonecam_set_video_resolution(width: Short, height: Short)
 
         fun phonecam_send_video_frame(
             data: ByteArray,
             len: NativeLong,
             pts: Long,
+            codec: Byte,
+            width: Short,
+            height: Short,
             isKeyframe: Boolean,
-        )
+        ): Boolean
+
+        fun phonecam_poll_control_command_json(): Pointer?
+
+        fun phonecam_peer_supports_profile(
+            codec: Byte,
+            width: Short,
+            height: Short,
+            fps: Byte,
+        ): Boolean
+
+        fun phonecam_update_video_capabilities(profilesJson: String): Boolean
+
+        fun phonecam_report_stream_configuration(
+            requestId: Int,
+            resultCode: Byte,
+            codec: Byte,
+            width: Short,
+            height: Short,
+            fps: Byte,
+        ): Boolean
 
         fun phonecam_parse_qr_code_uri(uri: String): Pointer?
-
-        fun phonecam_poll_control_command(): Long
 
         fun phonecam_discover_desktops(timeoutMs: Int): Pointer?
 
@@ -433,14 +592,22 @@ class StreamManager(
         fun initializeTransport(
             host: String,
             port: Int,
+            activeProfile: StreamProfile,
+            supportedProfiles: List<StreamProfile>,
         ): Boolean {
-            if (host.isBlank()) {
+            if (host.isBlank() || supportedProfiles.isEmpty() || activeProfile !in supportedProfiles) {
                 return false
             }
-
+            val profilesJson = JSONArray()
+            supportedProfiles.forEach { profilesJson.put(it.toJson()) }
+            val configJson =
+                JSONObject()
+                    .put("active_profile", activeProfile.toJson())
+                    .put("supported_profiles", profilesJson)
+                    .toString()
             val safePort = port.coerceIn(1, 65535)
             return runCatching {
-                lib.phonecam_transport_init(host, safePort.toShort())
+                lib.phonecam_transport_init(host, safePort.toShort(), configJson)
             }.onFailure {
                 Log.e(TAG, "Rust transport init failed", it)
             }.getOrDefault(false)
@@ -453,13 +620,28 @@ class StreamManager(
                 Log.w(TAG, "Rust transport shutdown failed", it)
             }
         }
+        fun updateVideoCapabilities(profiles: List<StreamProfile>): Boolean {
+            if (profiles.isEmpty()) {
+                return false
+            }
+            val json = JSONArray()
+            profiles.forEach { json.put(it.toJson()) }
+            return runCatching {
+                lib.phonecam_update_video_capabilities(json.toString())
+            }.onFailure {
+                Log.w(TAG, "Rust capability update failed", it)
+            }.getOrDefault(false)
+        }
+
 
         fun reconnectTransport(
             host: String,
             port: Int,
+            activeProfile: StreamProfile,
+            supportedProfiles: List<StreamProfile>,
         ): Boolean {
             shutdownTransport()
-            return initializeTransport(host, port)
+            return initializeTransport(host, port, activeProfile, supportedProfiles)
         }
 
         fun parseQrConnectionUri(uri: String): QrConnectionInfo? {
@@ -525,69 +707,192 @@ class StreamManager(
         }
 
         fun pollControlCommand(): RemoteControl? {
-            val packed =
+            val ptr =
                 runCatching {
-                    lib.phonecam_poll_control_command()
+                    lib.phonecam_poll_control_command_json()
                 }.onFailure {
                     Log.w(TAG, "Rust camera control poll failed", it)
-                }.getOrDefault(CONTROL_NONE)
-
-            return when ((packed and 0xffL).toInt()) {
-                CONTROL_SWITCH_FRONT -> RemoteControl.SwitchCamera(front = true)
-                CONTROL_SWITCH_BACK -> RemoteControl.SwitchCamera(front = false)
-                CONTROL_REQUEST_KEYFRAME -> RemoteControl.RequestKeyframe
-                CONTROL_CONFIGURE_STREAM ->
-                    RemoteControl.ConfigureStream(
-                        width = ((packed ushr 8) and 0xffffL).toInt(),
-                        height = ((packed ushr 24) and 0xffffL).toInt(),
-                        fps = ((packed ushr 40) and 0xffL).toInt(),
-                    )
-                else -> null
+                }.getOrNull() ?: return null
+            return try {
+                val json = JSONObject(ptr.getString(0))
+                when (json.optString("type")) {
+                    "switch_camera" -> RemoteControl.SwitchCamera(json.getBoolean("front"))
+                    "request_keyframe" -> RemoteControl.RequestKeyframe
+                    "configure_stream" -> {
+                        val profile = StreamProfile.fromJson(json.getJSONObject("profile")) ?: return null
+                        RemoteControl.ConfigureStream(
+                            requestId = json.getLong("request_id").toInt(),
+                            profile = profile,
+                        )
+                    }
+                    else -> null
+                }
+            } catch (error: Exception) {
+                Log.w(TAG, "Invalid Rust control JSON", error)
+                null
+            } finally {
+                runCatching { lib.phonecam_string_free(ptr) }
             }
         }
 
-        fun setVideoResolution(
-            width: Int,
-            height: Int,
-        ) {
+        fun reportConfiguration(
+            requestId: Int,
+            resultCode: Byte,
+            profile: StreamProfile,
+        ): Boolean =
             runCatching {
-                lib.phonecam_set_video_resolution(width.toShort(), height.toShort())
-            }.onFailure {
-                Log.w(TAG, "Failed to set Rust video resolution metadata", it)
-            }
-        }
+                lib.phonecam_report_stream_configuration(
+                    requestId,
+                    resultCode,
+                    profile.codec.nativeId,
+                    profile.width.toShort(),
+                    profile.height.toShort(),
+                    profile.fps.toByte(),
+                )
+            }.getOrDefault(false)
 
         fun sendVideoFrame(
             nalUnit: ByteArray,
             ptsUs: Long,
+            profile: StreamProfile,
             isKeyframe: Boolean,
-        ) {
+        ): Boolean {
             if (nalUnit.isEmpty()) {
-                return
+                return false
             }
-
-            runCatching {
+            return runCatching {
                 lib.phonecam_send_video_frame(
                     nalUnit,
                     NativeLong(nalUnit.size.toLong()),
                     ptsUs,
+                    profile.codec.nativeId,
+                    profile.width.toShort(),
+                    profile.height.toShort(),
                     isKeyframe,
                 )
             }.onFailure {
                 Log.w(TAG, "Rust video frame send failed", it)
-            }
+            }.getOrDefault(false)
         }
     }
 
     companion object {
         private const val TAG = "StreamManager"
         private const val CAMERA_CONTROL_POLL_INTERVAL_MS = 150L
-        private const val CONTROL_NONE = 0L
-        private const val CONTROL_SWITCH_BACK = 1
-        private const val CONTROL_SWITCH_FRONT = 2
-        private const val CONTROL_REQUEST_KEYFRAME = 3
-        private const val CONTROL_CONFIGURE_STREAM = 4
+        private const val RESULT_APPLIED: Byte = 0
+        private const val RESULT_UNSUPPORTED: Byte = 1
+        private const val RESULT_CAPTURE_FAILED: Byte = 2
         private val SUPPORTED_FRAME_RATES = setOf(15, 30, 60)
+        private const val MIN_BITRATE_OVERRIDE = 500_000
+        private const val MAX_BITRATE_OVERRIDE = 80_000_000
+
+        internal fun configurationCandidates(
+            requested: StreamProfile,
+            supported: List<StreamProfile>,
+        ): List<StreamProfile> {
+            val candidates = mutableListOf(requested)
+            if (requested.codec == VideoCodec.HEVC) {
+                requested.copy(codec = VideoCodec.H264)
+                    .takeIf { it in supported }
+                    ?.let(candidates::add)
+            }
+            return candidates
+        }
+
+        internal fun defaultBitrate(
+            codec: VideoCodec,
+            resolution: StreamResolution,
+            fps: Int,
+        ): Int {
+            val rateIndex =
+                when (fps) {
+                    15 -> 0
+                    30 -> 1
+                    60 -> 2
+                    else -> throw IllegalArgumentException("Unsupported frame rate: $fps")
+                }
+            val rates =
+                when (codec) {
+                    VideoCodec.H264 ->
+                        when (resolution) {
+                            StreamResolution.SD_480P -> intArrayOf(1_000_000, 2_000_000, 3_000_000)
+                            StreamResolution.HD_720P -> intArrayOf(2_500_000, 4_000_000, 7_000_000)
+                            StreamResolution.FULL_HD_1080P -> intArrayOf(4_000_000, 8_000_000, 12_000_000)
+                            StreamResolution.QHD_1440P -> intArrayOf(8_000_000, 16_000_000, 24_000_000)
+                            StreamResolution.UHD_2160P -> intArrayOf(16_000_000, 35_000_000, 50_000_000)
+                        }
+                    VideoCodec.HEVC ->
+                        when (resolution) {
+                            StreamResolution.SD_480P -> intArrayOf(750_000, 1_250_000, 2_000_000)
+                            StreamResolution.HD_720P -> intArrayOf(1_500_000, 2_500_000, 4_500_000)
+                            StreamResolution.FULL_HD_1080P -> intArrayOf(2_500_000, 5_000_000, 8_000_000)
+                            StreamResolution.QHD_1440P -> intArrayOf(5_000_000, 9_000_000, 15_000_000)
+                            StreamResolution.UHD_2160P -> intArrayOf(10_000_000, 20_000_000, 32_000_000)
+                        }
+                }
+            return rates[rateIndex]
+        }
+
+        internal fun intersectProfiles(
+            captureProfiles: Set<Pair<StreamResolution, Int>>,
+            encoderSupports: (StreamProfile, Int) -> Boolean,
+        ): List<StreamProfile> =
+            captureProfiles
+                .flatMap { (resolution, fps) ->
+                    VideoCodec.entries.mapNotNull { codec ->
+                        val profile =
+                            StreamProfile(codec, resolution.width, resolution.height, fps)
+                        profile.takeIf {
+                            encoderSupports(profile, defaultBitrate(codec, resolution, fps))
+                        }
+                    }
+                }.sortedWith(
+                    compareBy<StreamProfile>(
+                        { it.width * it.height },
+                        { it.fps },
+                        { it.codec.nativeId },
+                    ),
+                )
+
+        private fun discoverSupportedProfiles(
+            captureProfiles: Set<Pair<StreamResolution, Int>>,
+        ): List<StreamProfile> {
+            val codecInfos =
+                MediaCodecList(MediaCodecList.ALL_CODECS).codecInfos
+                    .asSequence()
+                    .filter(MediaCodecInfo::isEncoder)
+                    .sortedByDescending {
+                        if (android.os.Build.VERSION.SDK_INT >= 29) it.isHardwareAccelerated else true
+                    }.toList()
+            return intersectProfiles(captureProfiles) { profile, bitrate ->
+                val mime =
+                    when (profile.codec) {
+                        VideoCodec.H264 -> MediaFormat.MIMETYPE_VIDEO_AVC
+                        VideoCodec.HEVC -> MediaFormat.MIMETYPE_VIDEO_HEVC
+                    }
+                codecInfos.any { info ->
+                    mime in info.supportedTypes &&
+                        runCatching {
+                            val capabilities = info.getCapabilitiesForType(mime)
+                            val requiredProfile =
+                                when (profile.codec) {
+                                    VideoCodec.H264 -> setOf(
+                                        MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline,
+                                        MediaCodecInfo.CodecProfileLevel.AVCProfileHigh,
+                                    )
+                                    VideoCodec.HEVC -> setOf(MediaCodecInfo.CodecProfileLevel.HEVCProfileMain)
+                                }
+                            capabilities.profileLevels.any { it.profile in requiredProfile } &&
+                                capabilities.videoCapabilities.areSizeAndRateSupported(
+                                    profile.width,
+                                    profile.height,
+                                    profile.fps.toDouble(),
+                                ) &&
+                                bitrate in capabilities.videoCapabilities.bitrateRange
+                        }.getOrDefault(false)
+                }
+            }
+        }
 
         fun parseQrConnectionUri(uri: String): QrConnectionInfo? = RustBridge.parseQrConnectionUri(uri)
 
@@ -603,8 +908,7 @@ private sealed class RemoteControl {
     data object RequestKeyframe : RemoteControl()
 
     data class ConfigureStream(
-        val width: Int,
-        val height: Int,
-        val fps: Int,
+        val requestId: Int,
+        val profile: StreamProfile,
     ) : RemoteControl()
 }

@@ -49,10 +49,11 @@ final class PhoneCamStreamSource: NSObject, CMIOExtensionStreamSource {
 
     var activeFormatIndex: Int = 1 {
         didSet {
-            if !streamFormats.indices.contains(activeFormatIndex) {
-                logger.error("Unsupported PhoneCam stream format index: \(self.activeFormatIndex)")
+            guard streamFormats.indices.contains(activeFormatIndex) else {
                 activeFormatIndex = min(1, streamFormats.count - 1)
+                return
             }
+            (device.source as? PhoneCamDeviceSource)?.activeFormatDidChange()
         }
     }
 
@@ -81,13 +82,20 @@ final class PhoneCamStreamSource: NSObject, CMIOExtensionStreamSource {
             activeFormatIndex = requestedActiveFormatIndex
         }
 
-        if let requestedFrameDuration = streamProperties.frameDuration,
-           requestedFrameDuration.isValid,
-           !requestedFrameDuration.isIndefinite,
-           requestedFrameDuration.seconds > 0
-        {
+        if let requestedFrameDuration = streamProperties.frameDuration {
+            guard
+                requestedFrameDuration.isValid,
+                !requestedFrameDuration.isIndefinite,
+                Self.supportedFrameDurations.contains(where: {
+                    CMTimeCompare($0, requestedFrameDuration) == 0
+                })
+            else {
+                throw NSError(
+                    domain: NSOSStatusErrorDomain,
+                    code: Int(kCMIOHardwareIllegalOperationError)
+                )
+            }
             configuredFrameDuration = requestedFrameDuration
-
             if let deviceSource = device.source as? PhoneCamDeviceSource {
                 deviceSource.setFrameDuration(requestedFrameDuration)
             }
@@ -114,4 +122,8 @@ final class PhoneCamStreamSource: NSObject, CMIOExtensionStreamSource {
 
         deviceSource.stopStreaming()
     }
+    private static let supportedFrameDurations = [15, 30, 60].map {
+        CMTime(value: 1, timescale: Int32($0))
+    }
+
 }

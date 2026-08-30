@@ -1,4 +1,5 @@
 #include "frame_receiver.h"
+#include "stream_formats.h"
 
 #include <algorithm>
 #include <array>
@@ -14,8 +15,8 @@ namespace {
 
 constexpr std::size_t kFrameHeaderSize = 16;
 constexpr std::size_t kReadBufferSize = 64 * 1024;
-constexpr std::size_t kMaxPendingBytes = 64 * 1024 * 1024;
-constexpr std::size_t kMaxFramePayloadBytes = 100 * 1024 * 1024;
+constexpr std::size_t kMaxPendingBytes =
+    kFrameHeaderSize + static_cast<std::size_t>(phonecam::kMaximumNv12Bytes);
 
 inline std::uint32_t ReadUInt32LE(const std::uint8_t* data) {
     return static_cast<std::uint32_t>(data[0]) | (static_cast<std::uint32_t>(data[1]) << 8) |
@@ -63,35 +64,6 @@ void FrameReceiver::Stop() {
     }
 }
 
-bool FrameReceiver::WaitForFrame(std::uint64_t* last_sequence, DWORD timeout_ms, PhoneCamFrame* frame) {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
-    const std::uint64_t observed_sequence = last_sequence != nullptr ? *last_sequence : 0;
-
-    while (running_.load()) {
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            if (frame_sequence_ != 0 && frame_sequence_ != observed_sequence) {
-                if (frame != nullptr) {
-                    *frame = latest_frame_;
-                }
-
-                if (last_sequence != nullptr) {
-                    *last_sequence = frame_sequence_;
-                }
-
-                return true;
-            }
-        }
-
-        if (std::chrono::steady_clock::now() >= deadline) {
-            break;
-        }
-
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
-    }
-
-    return false;
-}
 
 bool FrameReceiver::TryGetLatestFrame(PhoneCamFrame* frame) const {
     if (frame == nullptr) {
@@ -107,15 +79,46 @@ bool FrameReceiver::TryGetLatestFrame(PhoneCamFrame* frame) const {
     return true;
 }
 
+void FrameReceiver::PublishFormat(
+    std::uint32_t width,
+    std::uint32_t height,
+    std::uint8_t fps) {
+    std::array<std::uint8_t, 16> event{
+        'P', 'C', 'F', 'M',
+        static_cast<std::uint8_t>(width),
+        static_cast<std::uint8_t>(width >> 8),
+        static_cast<std::uint8_t>(width >> 16),
+        static_cast<std::uint8_t>(width >> 24),
+        static_cast<std::uint8_t>(height),
+        static_cast<std::uint8_t>(height >> 8),
+        static_cast<std::uint8_t>(height >> 16),
+        static_cast<std::uint8_t>(height >> 24),
+        fps, 0, 0, 0};
+    std::lock_guard<std::mutex> lock(pipe_mutex_);
+    latest_format_event_ = event;
+    has_latest_format_event_ = true;
+#if defined(_WIN32)
+    if (pipe_handle_ != nullptr) {
+        DWORD bytes_written = 0;
+        WriteFile(
+            pipe_handle_,
+            latest_format_event_.data(),
+            static_cast<DWORD>(latest_format_event_.size()),
+            &bytes_written,
+            nullptr);
+    }
+#endif
+}
+
 void FrameReceiver::ReceiverLoop() {
 #if defined(_WIN32)
     while (running_.load()) {
         HANDLE pipe_handle = CreateNamedPipeW(
             kPipeName,
-            PIPE_ACCESS_INBOUND,
+            PIPE_ACCESS_DUPLEX,
             PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_NOWAIT | PIPE_REJECT_REMOTE_CLIENTS,
             1,
-            0,
+            static_cast<DWORD>(latest_format_event_.size()),
             static_cast<DWORD>(kReadBufferSize),
             250,
             nullptr);
@@ -142,7 +145,24 @@ void FrameReceiver::ReceiverLoop() {
         }
 
         if (connected) {
+            {
+                std::lock_guard<std::mutex> lock(pipe_mutex_);
+                pipe_handle_ = pipe_handle;
+                if (has_latest_format_event_) {
+                    DWORD bytes_written = 0;
+                    WriteFile(
+                        pipe_handle,
+                        latest_format_event_.data(),
+                        static_cast<DWORD>(latest_format_event_.size()),
+                        &bytes_written,
+                        nullptr);
+                }
+            }
             ReadFromPipe(pipe_handle);
+            {
+                std::lock_guard<std::mutex> lock(pipe_mutex_);
+                pipe_handle_ = nullptr;
+            }
             DisconnectNamedPipe(pipe_handle);
         }
         CloseHandle(pipe_handle);
@@ -249,19 +269,12 @@ bool FrameReceiver::ParsePacketHeader(
     const std::uint32_t parsed_height = ReadUInt32LE(header + 4);
     const std::uint64_t parsed_timestamp = ReadUInt64LE(header + 8);
 
-    if (parsed_width == 0 || parsed_height == 0) {
+    if (!phonecam::IsSupportedDimensions(parsed_width, parsed_height) ||
+        (parsed_width % 2) != 0 || (parsed_height % 2) != 0) {
         return false;
     }
-
-    if ((parsed_width % 2) != 0 || (parsed_height % 2) != 0) {
-        return false;
-    }
-
-    const std::uint64_t luma_samples =
-        static_cast<std::uint64_t>(parsed_width) * static_cast<std::uint64_t>(parsed_height);
-    const std::uint64_t total_samples = luma_samples + (luma_samples / 2);
-
-    if (total_samples == 0 || total_samples > kMaxFramePayloadBytes ||
+    const std::uint64_t total_samples = phonecam::Nv12Size(parsed_width, parsed_height);
+    if (total_samples == 0 || total_samples > phonecam::kMaximumNv12Bytes ||
         total_samples > static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max())) {
         return false;
     }

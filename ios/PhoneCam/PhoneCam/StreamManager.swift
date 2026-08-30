@@ -1,4 +1,50 @@
+import AVFoundation
+import VideoToolbox
 import Foundation
+enum VideoCodec: String, Codable, CaseIterable {
+    case h264
+    case hevc
+
+    var nativeID: UInt8 { self == .h264 ? 0 : 1 }
+    var cmCodecType: CMVideoCodecType {
+        self == .h264 ? kCMVideoCodecType_H264 : kCMVideoCodecType_HEVC
+    }
+    var profileLevel: CFString {
+        self == .h264 ? kVTProfileLevel_H264_Baseline_AutoLevel : kVTProfileLevel_HEVC_Main_AutoLevel
+    }
+}
+
+struct StreamProfile: Codable, Equatable, Hashable {
+    let codec: VideoCodec
+    let width: UInt16
+    let height: UInt16
+    let fps: UInt8
+}
+
+func streamConfigurationCandidates(
+    requested: StreamProfile,
+    available: [StreamProfile]
+) -> [StreamProfile] {
+    var candidates = [requested]
+    if requested.codec == .hevc {
+        let fallback = StreamProfile(
+            codec: .h264,
+            width: requested.width,
+            height: requested.height,
+            fps: requested.fps
+        )
+        if available.contains(fallback) {
+            candidates.append(fallback)
+        }
+    }
+    return candidates
+}
+private struct VideoConfig: Encodable {
+    let active_profile: StreamProfile
+    let supported_profiles: [StreamProfile]
+}
+
+
 
 final class StreamManager: ObservableObject {
     struct DesktopEndpoint: Identifiable, Equatable {
@@ -13,19 +59,29 @@ final class StreamManager: ObservableObject {
     @Published private(set) var isConnected = false
     @Published var selectedResolution: CaptureResolution = .p720
     @Published var selectedFps: Int32 = 30
+    @Published var selectedCodec: VideoCodec = .h264
     @Published private(set) var isFrontCamera = false
     @Published private(set) var discoveredDesktops: [DesktopEndpoint] = []
     @Published private(set) var isDiscovering = false
 
     private let cameraController: CameraController
-    private var encoder: H264Encoder?
+    private var encoder: VideoEncoder?
     private var connectionStatusTimer: Timer?
     private var cameraControlTimer: Timer?
     private var isStreaming = false
     private var cameraSwitchInProgress = false
 
-    private var endpointHost: String = "127.0.0.1"
-    private var endpointPort: UInt16 = 7878
+    private var committedProfile = StreamProfile(
+        codec: .h264,
+        width: 1280,
+        height: 720,
+        fps: 30
+    )
+    private var availableProfiles: [StreamProfile] = []
+
+    private var activeProfile: StreamProfile { committedProfile }
+    private var supportedProfiles: [StreamProfile] { availableProfiles }
+
 
     private struct QrConnectionInfo {
         let host: String
@@ -73,11 +129,25 @@ final class StreamManager: ObservableObject {
             self.cameraController.onSampleBuffer = { [weak self] sampleBuffer in
                 self?.encoder?.encode(sampleBuffer: sampleBuffer)
             }
-
-            self.configureEncoder(for: self.selectedResolution)
-            self.applyVideoDimensionsToRust()
+            self.availableProfiles = self.discoverSupportedProfiles()
+            let dimensions = self.selectedResolution.dimensionsU16
+            let startupProfile = StreamProfile(
+                codec: self.selectedCodec,
+                width: dimensions.width,
+                height: dimensions.height,
+                fps: UInt8(self.selectedFps)
+            )
+            guard
+                self.availableProfiles.contains(startupProfile),
+                let candidate = self.prepareEncoder(for: startupProfile)
+            else {
+                DispatchQueue.main.async {
+                    self.statusText = "Selected camera/encoder profile is unavailable"
+                }
+                return
+            }
+            self.commitEncoder(candidate, profile: startupProfile)
             self.initializeTransport()
-
             self.cameraController.startSession()
             self.startConnectionStatusPolling()
             self.startCameraControlPolling()
@@ -144,6 +214,13 @@ final class StreamManager: ObservableObject {
         reconfigureActiveCapture()
     }
 
+    func setCodec(_ codec: VideoCodec) {
+        guard selectedCodec != codec else { return }
+        selectedCodec = codec
+        guard isStreaming else { return }
+        reconfigureActiveCapture()
+    }
+
     func discoverDesktops() {
         guard !isDiscovering else {
             return
@@ -178,34 +255,141 @@ final class StreamManager: ObservableObject {
     }
 
     private func reconfigureActiveCapture() {
-        cameraController.stopSession()
+        let dimensions = selectedResolution.dimensionsU16
+        let profile = StreamProfile(
+            codec: selectedCodec,
+            width: dimensions.width,
+            height: dimensions.height,
+            fps: UInt8(selectedFps)
+        )
+        applyProfile(profile, requestID: 0, requirePeerSupport: true)
+    }
 
-        cameraController.requestAccessAndConfigure(
-            resolution: selectedResolution,
-            fps: selectedFps
-        ) { [weak self] granted in
-            guard let self else {
-                return
-            }
+    private func applyProfile(
+        _ requested: StreamProfile,
+        requestID: UInt32,
+        requirePeerSupport: Bool
+    ) {
+        guard !cameraSwitchInProgress, availableProfiles.contains(requested) else {
+            reportConfiguration(requestID: requestID, result: 1, profile: requested)
+            return
+        }
+        if requirePeerSupport, isConnected,
+           !phonecam_peer_supports_profile(
+               requested.codec.nativeID,
+               requested.width,
+               requested.height,
+               requested.fps
+           ) {
+            selectedResolution = CaptureResolution.matching(
+                width: activeProfile.width,
+                height: activeProfile.height
+            ) ?? .p720
+            selectedFps = Int32(activeProfile.fps)
+            return
+        }
+        guard let resolution = CaptureResolution.matching(
+            width: requested.width,
+            height: requested.height
+        ) else {
+            reportConfiguration(requestID: requestID, result: 1, profile: requested)
+            return
+        }
 
-            guard granted else {
-                DispatchQueue.main.async {
-                    self.statusText = "Requested camera format unavailable"
-                }
-                return
-            }
-
-            self.configureEncoder(for: self.selectedResolution)
-            self.applyVideoDimensionsToRust()
-            self.cameraController.startSession()
-            self.encoder?.requestKeyFrame()
-
-            DispatchQueue.main.async {
-                self.statusText = self.isConnected
-                    ? self.streamingStatusText()
-                    : self.disconnectedStatusText()
+        cameraSwitchInProgress = true
+        let previous = activeProfile
+        var applied = requested
+        var candidate: VideoEncoder?
+        for possible in streamConfigurationCandidates(
+            requested: requested,
+            available: availableProfiles
+        ) {
+            if let prepared = prepareEncoder(for: possible) {
+                candidate = prepared
+                applied = possible
+                break
             }
         }
+        guard let candidate else {
+            availableProfiles.removeAll { $0 == requested }
+            updateCapabilities()
+            reportConfiguration(requestID: requestID, result: 2, profile: requested)
+            cameraSwitchInProgress = false
+            return
+        }
+
+        cameraController.stopSession()
+        cameraController.requestAccessAndConfigure(
+            resolution: resolution,
+            fps: Int32(applied.fps)
+        ) { [weak self] success in
+            guard let self else { return }
+            defer { self.cameraSwitchInProgress = false }
+            guard success else {
+                candidate.stop()
+                self.availableProfiles.removeAll { $0 == requested }
+                self.updateCapabilities()
+                self.reportConfiguration(requestID: requestID, result: 2, profile: requested)
+                self.restoreCapture(profile: previous)
+                return
+            }
+            self.selectedResolution = resolution
+            self.selectedFps = Int32(applied.fps)
+            self.selectedCodec = applied.codec
+            self.commitEncoder(candidate, profile: applied)
+            self.reportConfiguration(requestID: requestID, result: 0, profile: applied)
+            self.cameraController.startSession()
+            self.encoder?.requestKeyFrame()
+            self.statusText = self.streamingStatusText()
+        }
+    }
+
+    private func restoreCapture(profile: StreamProfile) {
+        guard let resolution = CaptureResolution.matching(
+            width: profile.width,
+            height: profile.height
+        ) else { return }
+        selectedResolution = resolution
+        selectedFps = Int32(profile.fps)
+        selectedCodec = profile.codec
+        cameraController.requestAccessAndConfigure(
+            resolution: resolution,
+            fps: Int32(profile.fps)
+        ) { [weak self] success in
+            guard let self else { return }
+            guard success else {
+                self.encoder?.stop()
+                self.isStreaming = false
+                self.statusText = "Terminal stream failure: unable to restore previous configuration"
+                phonecam_transport_shutdown()
+                return
+            }
+            self.cameraController.startSession()
+            self.encoder?.requestKeyFrame()
+        }
+    }
+
+    private func reportConfiguration(
+        requestID: UInt32,
+        result: UInt8,
+        profile: StreamProfile
+    ) {
+        guard isConnected else { return }
+        _ = phonecam_report_stream_configuration(
+            requestID,
+            result,
+            profile.codec.nativeID,
+            profile.width,
+            profile.height,
+            profile.fps
+        )
+    }
+
+    private func updateCapabilities() {
+        guard let data = try? JSONEncoder().encode(availableProfiles),
+              let json = String(data: data, encoding: .utf8)
+        else { return }
+        json.withCString { _ = phonecam_update_video_capabilities($0) }
     }
 
     @discardableResult
@@ -235,56 +419,71 @@ final class StreamManager: ObservableObject {
         return true
     }
 
-    private func configureEncoder(for resolution: CaptureResolution) {
-        let size = resolution.dimensions
-
-        do {
-            if let encoder {
-                try encoder.updateConfiguration(
-                    width: size.width,
-                    height: size.height,
-                    fps: selectedFps,
-                    bitrate: resolution.targetBitrate
+    private func prepareEncoder(for profile: StreamProfile) -> VideoEncoder? {
+        let candidate = VideoEncoder(
+            codec: profile.codec,
+            width: Int32(profile.width),
+            height: Int32(profile.height),
+            fps: Int32(profile.fps),
+            bitrate: Self.bitrate(for: profile)
+        )
+        candidate.onEncodedNALUnit = { [weak self] nalUnit, ptsUs, isKeyframe in
+            guard let self else { return }
+            let active = self.activeProfile
+            let accepted = nalUnit.withUnsafeBytes { rawBuffer -> Bool in
+                guard let baseAddress = rawBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self)
+                else { return false }
+                return phonecam_send_video_frame(
+                    baseAddress,
+                    rawBuffer.count,
+                    ptsUs,
+                    active.codec.nativeID,
+                    active.width,
+                    active.height,
+                    isKeyframe
                 )
-            } else {
-                let newEncoder = H264Encoder(
-                    width: size.width,
-                    height: size.height,
-                    fps: selectedFps,
-                    bitrate: resolution.targetBitrate
-                )
-
-                newEncoder.onEncodedNALUnit = { nalUnit, ptsUs, isKeyframe in
-                    nalUnit.withUnsafeBytes { rawBuffer in
-                        guard
-                            let baseAddress = rawBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self)
-                        else {
-                            return
-                        }
-
-                        phonecam_send_video_frame(baseAddress, rawBuffer.count, ptsUs, isKeyframe)
-                    }
-                }
-
-                try newEncoder.start()
-                encoder = newEncoder
             }
-        } catch {
+            if !accepted && isKeyframe { self.encoder?.requestKeyFrame() }
+        }
+        candidate.onFatalError = { [weak self] error in
             DispatchQueue.main.async {
-                self.statusText = "Encoder error: \(error.localizedDescription)"
+                self?.statusText = "Encoder error: \(error)"
             }
+        }
+        do {
+            try candidate.start()
+            return candidate
+        } catch {
+            candidate.stop()
+            return nil
         }
     }
 
-    private func applyVideoDimensionsToRust() {
-        let dimensions = selectedResolution.dimensionsU16
-        phonecam_set_video_dimensions(dimensions.width, dimensions.height)
+    private func commitEncoder(_ candidate: VideoEncoder, profile: StreamProfile) {
+        let previous = encoder
+        committedProfile = profile
+        encoder = candidate
+        previous?.stop()
     }
+
 
     @discardableResult
     private func initializeTransport() -> Bool {
+        guard
+            let configData = try? JSONEncoder().encode(
+                VideoConfig(
+                    active_profile: activeProfile,
+                    supported_profiles: supportedProfiles
+                )
+            ),
+            let configJSON = String(data: configData, encoding: .utf8)
+        else {
+            return false
+        }
         let initialized = endpointHost.withCString { hostCString in
-            phonecam_transport_init(hostCString, endpointPort)
+            configJSON.withCString { configCString in
+                phonecam_transport_init(hostCString, endpointPort, configCString)
+            }
         }
 
         let connected = initialized && phonecam_transport_is_connected()
@@ -395,45 +594,61 @@ final class StreamManager: ObservableObject {
     }
 
     private func pollCameraControlCommand() {
-        guard isStreaming, !cameraSwitchInProgress else {
+        guard isStreaming, !cameraSwitchInProgress, let pointer = phonecam_poll_control_command_json() else {
             return
         }
-
-        let command = phonecam_poll_control_command()
-        switch UInt8(command & 0xff) {
-        case Self.cameraSwitchFrontCommand:
-            handleRemoteCameraSwitch(toFront: true)
-        case Self.cameraSwitchBackCommand:
-            handleRemoteCameraSwitch(toFront: false)
-        case Self.requestKeyframeCommand:
+        defer { phonecam_string_free(pointer) }
+        guard
+            let data = String(cString: pointer).data(using: .utf8),
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let type = object["type"] as? String
+        else {
+            return
+        }
+        switch type {
+        case "switch_camera":
+            if let front = object["front"] as? Bool {
+                handleRemoteCameraSwitch(toFront: front)
+            }
+        case "request_keyframe":
             encoder?.requestKeyFrame()
-        case Self.configureStreamCommand:
-            let width = UInt16((command >> 8) & 0xffff)
-            let height = UInt16((command >> 24) & 0xffff)
-            let fps = Int32((command >> 40) & 0xff)
-            handleRemoteStreamConfiguration(width: width, height: height, fps: fps)
+        case "configure_stream":
+            guard
+                let requestNumber = object["request_id"] as? NSNumber,
+                let profileObject = object["profile"] as? [String: Any],
+                let codecLiteral = profileObject["codec"] as? String,
+                let codec = VideoCodec(rawValue: codecLiteral),
+                let width = (profileObject["width"] as? NSNumber)?.uint16Value,
+                let height = (profileObject["height"] as? NSNumber)?.uint16Value,
+                let fps = (profileObject["fps"] as? NSNumber)?.uint8Value
+            else {
+                return
+            }
+            handleRemoteStreamConfiguration(
+                requestID: requestNumber.uint32Value,
+                profile: StreamProfile(codec: codec, width: width, height: height, fps: fps)
+            )
         default:
             return
         }
     }
 
-    private func handleRemoteStreamConfiguration(width: UInt16, height: UInt16, fps: Int32) {
+    private func handleRemoteStreamConfiguration(requestID: UInt32, profile: StreamProfile) {
         guard
-            let resolution = CaptureResolution.matching(width: width, height: height),
-            Self.supportedFrameRates.contains(fps)
+            CaptureResolution.matching(width: profile.width, height: profile.height) != nil,
+            Self.supportedFrameRates.contains(Int32(profile.fps)),
+            supportedProfiles.contains(profile)
         else {
-            statusText = "Desktop requested unsupported stream configuration \(width)x\(height)@\(fps)"
+            reportConfiguration(requestID: requestID, result: 1, profile: profile)
+            statusText = "Desktop requested unsupported stream configuration"
             return
         }
-
-        guard resolution != selectedResolution || fps != selectedFps else {
+        if profile == activeProfile {
+            reportConfiguration(requestID: requestID, result: 0, profile: profile)
             encoder?.requestKeyFrame()
             return
         }
-
-        selectedResolution = resolution
-        selectedFps = fps
-        reconfigureActiveCapture()
+        applyProfile(profile, requestID: requestID, requirePeerSupport: false)
     }
 
     private func handleRemoteCameraSwitch(toFront: Bool) {
@@ -445,8 +660,6 @@ final class StreamManager: ObservableObject {
         statusText = "Switching to \(toFront ? "front" : "back") camera…"
 
         cameraController.stopSession()
-        encoder?.stop()
-        encoder = nil
 
         cameraController.switchCamera(toFront: toFront) { [weak self] success, actualFront in
             guard let self else {
@@ -457,10 +670,13 @@ final class StreamManager: ObservableObject {
                 self.cameraSwitchInProgress = false
             }
 
-            self.configureEncoder(for: self.selectedResolution)
-            self.applyVideoDimensionsToRust()
             self.cameraController.startSession()
             self.encoder?.requestKeyFrame()
+            self.availableProfiles =
+                self.discoverSupportedProfiles(
+                    position: actualFront ? .front : .back
+                )
+            self.updateCapabilities()
 
             self.isFrontCamera = actualFront
 
@@ -480,34 +696,80 @@ final class StreamManager: ObservableObject {
 
     private func startConnectionStatusPolling() {
         connectionStatusTimer?.invalidate()
-
         let timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
-            guard let self else {
-                return
-            }
-
+            guard let self else { return }
             let connected = phonecam_transport_is_connected()
-            guard connected != self.isConnected else {
-                return
-            }
-
+            guard connected != self.isConnected else { return }
             self.isConnected = connected
-
             if connected {
                 self.statusText = self.streamingStatusText()
             } else if self.isStreaming {
                 self.statusText = self.disconnectedStatusText()
             }
         }
-
         RunLoop.main.add(timer, forMode: .common)
         connectionStatusTimer = timer
     }
 
-    private static let cameraControlPollInterval: TimeInterval = 0.15
-    private static let cameraSwitchBackCommand: UInt8 = 1
-    private static let cameraSwitchFrontCommand: UInt8 = 2
-    private static let requestKeyframeCommand: UInt8 = 3
-    private static let configureStreamCommand: UInt8 = 4
+    private func discoverSupportedProfiles(
+        position: AVCaptureDevice.Position = .back
+    ) -> [StreamProfile] {
+        cameraController.supportedCaptureProfiles(position: position)
+            .flatMap { capture in
+                VideoCodec.allCases.compactMap { codec -> StreamProfile? in
+                    let dimensions = capture.resolution.dimensionsU16
+                    let profile = StreamProfile(
+                        codec: codec,
+                        width: dimensions.width,
+                        height: dimensions.height,
+                        fps: UInt8(capture.fps)
+                    )
+                    let probe = VideoEncoder(
+                        codec: codec,
+                        width: Int32(profile.width),
+                        height: Int32(profile.height),
+                        fps: Int32(profile.fps),
+                        bitrate: Self.bitrate(for: profile)
+                    )
+                    do {
+                        try probe.start()
+                        probe.stop()
+                        return profile
+                    } catch {
+                        probe.stop()
+                        return nil
+                    }
+                }
+            }
+            .sorted {
+                (Int($0.width) * Int($0.height), $0.fps, $0.codec.nativeID)
+                    < (Int($1.width) * Int($1.height), $1.fps, $1.codec.nativeID)
+            }
+    }
+
+    static func bitrate(for profile: StreamProfile) -> Int {
+        guard
+            let resolution = CaptureResolution.matching(
+                width: profile.width,
+                height: profile.height
+            ),
+            let index = [15, 30, 60].firstIndex(of: Int(profile.fps))
+        else { preconditionFailure("Invalid stream profile") }
+        let values: [Int]
+        switch (profile.codec, resolution) {
+        case (.h264, .p480): values = [1_000_000, 2_000_000, 3_000_000]
+        case (.h264, .p720): values = [2_500_000, 4_000_000, 7_000_000]
+        case (.h264, .p1080): values = [4_000_000, 8_000_000, 12_000_000]
+        case (.h264, .p1440): values = [8_000_000, 16_000_000, 24_000_000]
+        case (.h264, .p2160): values = [16_000_000, 35_000_000, 50_000_000]
+        case (.hevc, .p480): values = [750_000, 1_250_000, 2_000_000]
+        case (.hevc, .p720): values = [1_500_000, 2_500_000, 4_500_000]
+        case (.hevc, .p1080): values = [2_500_000, 5_000_000, 8_000_000]
+        case (.hevc, .p1440): values = [5_000_000, 9_000_000, 15_000_000]
+        case (.hevc, .p2160): values = [10_000_000, 20_000_000, 32_000_000]
+        }
+        return values[index]
+    }
     private static let supportedFrameRates: Set<Int32> = [15, 30, 60]
 }
+

@@ -3,7 +3,10 @@
 use serde::{de::DeserializeOwned, Serialize};
 use thiserror::Error;
 
-use crate::{AudioFrame, CameraControl, Disconnect, Handshake, StatusUpdate, VideoFrame};
+use crate::{
+    AudioFrame, CameraControl, Disconnect, Handshake, StatusUpdate, StreamConfigurationResult,
+    VideoCapabilitiesUpdate, VideoFrame,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Message {
@@ -14,6 +17,8 @@ pub enum Message {
     CameraControl(CameraControl),
     StatusUpdate(StatusUpdate),
     Disconnect(Disconnect),
+    StreamConfigurationResult(StreamConfigurationResult),
+    VideoCapabilitiesUpdate(VideoCapabilitiesUpdate),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,6 +30,8 @@ pub enum MessageType {
     CameraControl = 4,
     StatusUpdate = 5,
     Disconnect = 6,
+    StreamConfigurationResult = 7,
+    VideoCapabilitiesUpdate = 8,
 }
 
 #[derive(Debug, Error)]
@@ -49,6 +56,8 @@ impl Message {
             Message::CameraControl(_) => MessageType::CameraControl,
             Message::StatusUpdate(_) => MessageType::StatusUpdate,
             Message::Disconnect(_) => MessageType::Disconnect,
+            Message::StreamConfigurationResult(_) => MessageType::StreamConfigurationResult,
+            Message::VideoCapabilitiesUpdate(_) => MessageType::VideoCapabilitiesUpdate,
         }
     }
 
@@ -61,6 +70,8 @@ impl Message {
             Message::CameraControl(message) => encode_payload(message),
             Message::StatusUpdate(message) => encode_payload(message),
             Message::Disconnect(message) => encode_payload(message),
+            Message::StreamConfigurationResult(message) => encode_payload(message),
+            Message::VideoCapabilitiesUpdate(message) => encode_payload(message),
         }
     }
 
@@ -76,6 +87,12 @@ impl Message {
             MessageType::CameraControl => Message::CameraControl(decode_payload(payload)?),
             MessageType::StatusUpdate => Message::StatusUpdate(decode_payload(payload)?),
             MessageType::Disconnect => Message::Disconnect(decode_payload(payload)?),
+            MessageType::StreamConfigurationResult => {
+                Message::StreamConfigurationResult(decode_payload(payload)?)
+            }
+            MessageType::VideoCapabilitiesUpdate => {
+                Message::VideoCapabilitiesUpdate(decode_payload(payload)?)
+            }
         };
 
         Ok(message)
@@ -93,6 +110,12 @@ impl TryFrom<u8> for MessageType {
             x if x == MessageType::CameraControl as u8 => Ok(MessageType::CameraControl),
             x if x == MessageType::StatusUpdate as u8 => Ok(MessageType::StatusUpdate),
             x if x == MessageType::Disconnect as u8 => Ok(MessageType::Disconnect),
+            x if x == MessageType::StreamConfigurationResult as u8 => {
+                Ok(MessageType::StreamConfigurationResult)
+            }
+            x if x == MessageType::VideoCapabilitiesUpdate as u8 => {
+                Ok(MessageType::VideoCapabilitiesUpdate)
+            }
             other => Err(MessageCodecError::UnknownMessageType(other)),
         }
     }

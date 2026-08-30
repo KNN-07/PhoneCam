@@ -2,12 +2,15 @@ package com.phonecam.app
 
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
+import android.media.MediaCodecList
 import android.media.MediaFormat
 import android.os.Bundle
+import android.os.Build
 import android.util.Log
 import androidx.camera.core.ImageProxy
 
-class H264Encoder(
+class VideoEncoder(
+    private val codec: VideoCodec = VideoCodec.H264,
     private val width: Int = 1280,
     private val height: Int = 720,
     private val bitRate: Int = 4_000_000,
@@ -18,6 +21,7 @@ class H264Encoder(
     private var mediaCodec: MediaCodec? = null
     private var colorFormat: Int = MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible
     private val bufferInfo = MediaCodec.BufferInfo()
+    private var codecConfig: ByteArray? = null
     private var started = false
 
     fun start() {
@@ -25,17 +29,23 @@ class H264Encoder(
             return
         }
 
-        val codec = MediaCodec.createEncoderByType(MIME_TYPE)
-        val capabilities = codec.codecInfo.getCapabilitiesForType(MIME_TYPE)
+        val mimeType = mimeType(codec)
+        val codecInfo = selectEncoder(mimeType)
+        val codecInstance = MediaCodec.createByCodecName(codecInfo.name)
+        val capabilities = codecInfo.getCapabilitiesForType(mimeType)
         colorFormat = selectColorFormat(capabilities.colorFormats)
+        val effectiveBitrate =
+            bitRate.coerceIn(
+                capabilities.videoCapabilities.bitrateRange.lower,
+                capabilities.videoCapabilities.bitrateRange.upper,
+            )
 
         val format =
-            MediaFormat.createVideoFormat(MIME_TYPE, width, height).apply {
+            MediaFormat.createVideoFormat(mimeType, width, height).apply {
                 setInteger(MediaFormat.KEY_COLOR_FORMAT, colorFormat)
-                setInteger(MediaFormat.KEY_BIT_RATE, bitRate)
+                setInteger(MediaFormat.KEY_BIT_RATE, effectiveBitrate)
                 setInteger(MediaFormat.KEY_FRAME_RATE, frameRate)
                 setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, iFrameIntervalSec)
-
                 runCatching {
                     setInteger(
                         MediaFormat.KEY_BITRATE_MODE,
@@ -45,24 +55,30 @@ class H264Encoder(
                 runCatching {
                     setInteger(
                         MediaFormat.KEY_PROFILE,
-                        MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline,
-                    )
-                }
-                runCatching {
-                    setInteger(
-                        MediaFormat.KEY_LEVEL,
-                        MediaCodecInfo.CodecProfileLevel.AVCLevel31,
+                        when (codec) {
+                            VideoCodec.H264 ->
+                                if (
+                                    capabilities.profileLevels.any {
+                                        it.profile == MediaCodecInfo.CodecProfileLevel.AVCProfileHigh
+                                    }
+                                ) {
+                                    MediaCodecInfo.CodecProfileLevel.AVCProfileHigh
+                                } else {
+                                    MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline
+                                }
+                            VideoCodec.HEVC -> MediaCodecInfo.CodecProfileLevel.HEVCProfileMain
+                        },
                     )
                 }
             }
 
-        codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-        codec.start()
+        codecInstance.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+        codecInstance.start()
 
-        mediaCodec = codec
+        mediaCodec = codecInstance
         started = true
 
-        Log.i(TAG, "H.264 encoder started at ${width}x$height @ ${bitRate}bps")
+        Log.i(TAG, "${codec.wireName} encoder started at ${width}x$height @ ${effectiveBitrate}bps")
     }
 
     fun encode(imageProxy: ImageProxy) {
@@ -118,17 +134,18 @@ class H264Encoder(
             drainOutput(codec)
             codec.stop()
         }.onFailure {
-            Log.w(TAG, "Failed to stop H.264 encoder cleanly", it)
+            Log.w(TAG, "Failed to stop ${this.codec.wireName} encoder cleanly", it)
         }
 
         runCatching {
             codec.release()
         }.onFailure {
-            Log.w(TAG, "Failed to release H.264 encoder", it)
+            Log.w(TAG, "Failed to release ${this.codec.wireName} encoder", it)
         }
 
         mediaCodec = null
         started = false
+        codecConfig = null
     }
 
     fun requestKeyFrame() {
@@ -157,37 +174,34 @@ class H264Encoder(
                     if (outputBuffer != null && bufferInfo.size > 0) {
                         outputBuffer.position(bufferInfo.offset)
                         outputBuffer.limit(bufferInfo.offset + bufferInfo.size)
-
                         val encodedPayload = ByteArray(bufferInfo.size)
                         outputBuffer.get(encodedPayload)
-                        val nalUnit = H264NalUnit.toAnnexB(encodedPayload)
-
+                        val nalUnit = EncodedNalUnit.toAnnexB(encodedPayload, this.codec)
                         val isCodecConfig =
                             (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0
                         val isKeyframe =
-                            isCodecConfig ||
-                                (bufferInfo.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0
-
-                        onNalUnitReady(
-                            nalUnit,
-                            bufferInfo.presentationTimeUs,
-                            isKeyframe,
-                        )
+                            (bufferInfo.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0
+                        if (isCodecConfig) {
+                            codecConfig = nalUnit
+                        } else {
+                            onNalUnitReady(
+                                EncodedNalUnit.prefixParameterSets(
+                                    codecConfig,
+                                    nalUnit,
+                                    isKeyframe,
+                                ),
+                                bufferInfo.presentationTimeUs,
+                                isKeyframe,
+                            )
+                        }
                     }
                     codec.releaseOutputBuffer(outputBufferIndex, false)
                 }
-
                 outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                     Log.i(TAG, "Encoder output format changed: ${codec.outputFormat}")
                 }
-
-                outputBufferIndex == MediaCodec.INFO_TRY_AGAIN_LATER -> {
-                    return
-                }
-
-                else -> {
-                    return
-                }
+                outputBufferIndex == MediaCodec.INFO_TRY_AGAIN_LATER -> return
+                else -> return
             }
         }
     }
@@ -205,7 +219,7 @@ class H264Encoder(
 
         return preferredColorFormats.firstOrNull { it in colorFormats }
             ?: throw IllegalStateException(
-                "No supported YUV420 color format for H.264 encoder",
+                "No supported YUV420 color format for ${codec.wireName} encoder",
             )
     }
 
@@ -297,9 +311,41 @@ class H264Encoder(
         return output
     }
 
+        private fun selectEncoder(mimeType: String): MediaCodecInfo =
+            MediaCodecList(MediaCodecList.ALL_CODECS).codecInfos
+                .asSequence()
+                .filter { it.isEncoder && mimeType in it.supportedTypes }
+                .sortedByDescending {
+                    if (Build.VERSION.SDK_INT >= 29) it.isHardwareAccelerated else true
+                }.firstOrNull { info ->
+                    runCatching {
+                        val capabilities = info.getCapabilitiesForType(mimeType)
+                        val requiredProfile =
+                            when (codec) {
+                                VideoCodec.H264 -> setOf(
+                                    MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline,
+                                    MediaCodecInfo.CodecProfileLevel.AVCProfileHigh,
+                                )
+                                VideoCodec.HEVC -> setOf(MediaCodecInfo.CodecProfileLevel.HEVCProfileMain)
+                            }
+                        capabilities.profileLevels.any { it.profile in requiredProfile } &&
+                            capabilities.videoCapabilities.areSizeAndRateSupported(
+                                width,
+                                height,
+                                frameRate.toDouble(),
+                            )
+                    }.getOrDefault(false)
+                } ?: throw IllegalStateException(
+                "No ${codec.wireName} encoder supports ${width}x${height}@$frameRate",
+            )
     companion object {
-        private const val TAG = "H264Encoder"
-        private const val MIME_TYPE = MediaFormat.MIMETYPE_VIDEO_AVC
+
+        private const val TAG = "VideoEncoder"
+        private fun mimeType(codec: VideoCodec): String =
+            when (codec) {
+                VideoCodec.H264 -> MediaFormat.MIMETYPE_VIDEO_AVC
+                VideoCodec.HEVC -> MediaFormat.MIMETYPE_VIDEO_HEVC
+            }
         private const val COLOR_TI_FORMAT_YUV420_PACKED_SEMIPLANAR = 0x7F000100
     }
 }
