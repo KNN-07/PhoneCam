@@ -469,6 +469,8 @@ final class CameraController: NSObject, ObservableObject {
             return "Camera unavailable with multiple foreground apps"
         case .videoDeviceNotAvailableDueToSystemPressure:
             return "Camera paused due to system pressure"
+        case .sensitiveContentMitigationActivated:
+            return "Camera paused by sensitive content protection"
         @unknown default:
             return "Camera session interrupted"
         }

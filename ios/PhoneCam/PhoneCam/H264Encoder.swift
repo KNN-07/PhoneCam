@@ -152,7 +152,7 @@ final class H264Encoder {
         VTCompressionSessionPrepareToEncodeFrames(newSession)
     }
 
-    private func handleCompressedSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
+    fileprivate func handleCompressedSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
         guard CMSampleBufferDataIsReady(sampleBuffer) else {
             return
         }
