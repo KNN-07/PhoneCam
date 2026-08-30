@@ -390,10 +390,20 @@
 				CODE_SIGNING_ALLOWED = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/PhoneCam/Generated",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.phonecam.ios.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
+				OTHER_SWIFT_FLAGS = (
+					"$(inherited)",
+					"-Xcc",
+					"-fmodule-map-file=$(PROJECT_DIR)/PhoneCam/Generated/phonecam_mobile_coreFFI.modulemap",
+				);
 				SWIFT_VERSION = 5.0;
+				SWIFT_INCLUDE_PATHS = "$(PROJECT_DIR)/PhoneCam/Generated";
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PhoneCam.app/PhoneCam";
 			};
@@ -406,10 +416,20 @@
 				CODE_SIGNING_ALLOWED = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PROJECT_DIR)/PhoneCam/Generated",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = com.phonecam.ios.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
+				OTHER_SWIFT_FLAGS = (
+					"$(inherited)",
+					"-Xcc",
+					"-fmodule-map-file=$(PROJECT_DIR)/PhoneCam/Generated/phonecam_mobile_coreFFI.modulemap",
+				);
 				SWIFT_VERSION = 5.0;
+				SWIFT_INCLUDE_PATHS = "$(PROJECT_DIR)/PhoneCam/Generated";
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/PhoneCam.app/PhoneCam";
 			};

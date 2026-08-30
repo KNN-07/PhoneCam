@@ -70,6 +70,8 @@ final class StreamManager: ObservableObject {
     private var cameraControlTimer: Timer?
     private var isStreaming = false
     private var cameraSwitchInProgress = false
+    private var endpointHost = "127.0.0.1"
+    private var endpointPort: UInt16 = 7878
 
     private var committedProfile = StreamProfile(
         codec: .h264,
@@ -771,5 +773,6 @@ final class StreamManager: ObservableObject {
         return values[index]
     }
     private static let supportedFrameRates: Set<Int32> = [15, 30, 60]
+    private static let cameraControlPollInterval: TimeInterval = 0.15
 }
 

@@ -89,9 +89,17 @@ final class VideoEncoder {
 
     private func createCompressionSession() throws {
         var session: VTCompressionSession?
-        let specification: CFDictionary? = codec == .hevc
-            ? [kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder: true] as CFDictionary
-            : nil
+        let specification: CFDictionary?
+        if codec == .hevc {
+            guard #available(iOS 17.4, *) else {
+                throw EncoderError.hardwareEncoderUnavailable
+            }
+            specification = [
+                kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder: true
+            ] as CFDictionary
+        } else {
+            specification = nil
+        }
         let status = VTCompressionSessionCreate(
             allocator: kCFAllocatorDefault,
             width: width,
@@ -123,6 +131,9 @@ final class VideoEncoder {
         let prepareStatus = VTCompressionSessionPrepareToEncodeFrames(session)
         guard prepareStatus == noErr else { throw EncoderError.prepareFailed(prepareStatus) }
         if codec == .hevc {
+            guard #available(iOS 17.4, *) else {
+                throw EncoderError.hardwareEncoderUnavailable
+            }
             var value: CFTypeRef?
             let hardwareStatus = VTSessionCopyProperty(
                 session,
