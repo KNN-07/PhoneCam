@@ -353,7 +353,7 @@ final class PhoneCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
             }
 
             let frameDurations = [15, 30, 60].map {
-                NSValue(time: CMTime(value: 1, timescale: Int32($0)))
+                CMTime(value: 1, timescale: Int32($0))
             }
             return CMIOExtensionStreamFormat(
                 formatDescription: formatDescription,
