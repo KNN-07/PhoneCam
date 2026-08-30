@@ -68,17 +68,17 @@ jobs:
         if: runner.os == 'Linux'
         run: cargo fmt --all -- --check
 
-      - name: Lint
-        run: cargo clippy ${{ matrix.cargo_flags }} --all-targets --locked -- -D warnings
-
-      - name: Test
-        run: cargo test ${{ matrix.cargo_flags }} --locked
-
       - name: Build Windows virtual camera
         if: runner.os == 'Windows'
         run: |
           cmake -S windows/PhoneCamDriver -B build/windows-driver -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build/windows-driver
+
+      - name: Lint
+        run: cargo clippy ${{ matrix.cargo_flags }} --all-targets --locked -- -D warnings
+
+      - name: Test
+        run: cargo test ${{ matrix.cargo_flags }} --locked
 
       - name: Upload Windows virtual camera
         if: runner.os == 'Windows'

@@ -13,6 +13,7 @@
 #include <limits>
 #include <new>
 
+#include <dvdmedia.h>
 #include <ksmedia.h>
 
 #ifndef KSPROPERTY_SUPPORT_GET

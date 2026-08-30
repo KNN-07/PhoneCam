@@ -2,6 +2,7 @@
 
 #include <windows.h>
 #include <initguid.h>
+#include <cguid.h>
 #include <dshow.h>
 
 #include <atomic>
