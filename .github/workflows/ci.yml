@@ -1,18 +1,31 @@
-name: CI
+name: Build and test
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
   pull_request:
-    branches: [main]
+    branches:
+      - main
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
 
 jobs:
-  rust-checks:
-    name: Rust checks (${{ matrix.os }})
+  rust:
+    name: Rust (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -20,151 +33,259 @@ jobs:
           - os: ubuntu-latest
             cargo_flags: --workspace
           - os: macos-latest
-            cargo_flags: --workspace --exclude phonecam-driver-linux --exclude phonecam-desktop
+            cargo_flags: --workspace --exclude phonecam-driver-linux
           - os: windows-latest
-            cargo_flags: --workspace --exclude phonecam-driver-linux --exclude phonecam-desktop
+            cargo_flags: --workspace --exclude phonecam-driver-linux
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out source
+        uses: actions/checkout@v7
 
-      - name: Install Linux system dependencies
-        if: matrix.os == 'ubuntu-latest'
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            v4l2loopback-dkms \
-            v4l2loopback-utils \
-            ffmpeg \
-            libavcodec-dev \
-            libavdevice-dev \
-            libavfilter-dev \
-            libavformat-dev \
-            libavutil-dev \
-            libswscale-dev \
-            libv4l-dev \
-            libgtk-3-dev \
             libayatana-appindicator3-dev \
             librsvg2-dev \
+            libv4l-dev \
             pkg-config
           sudo apt-get install -y libwebkit2gtk-4.1-dev || sudo apt-get install -y libwebkit2gtk-4.0-dev
 
-      - name: Setup Xcode
-        if: matrix.os == 'macos-latest'
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: latest-stable
-
-      - name: Setup Visual Studio build tools
-        if: matrix.os == 'windows-latest'
+      - name: Set up Visual Studio build tools
+        if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy, rustfmt
+          components: clippy,rustfmt
 
-      - name: Rust cache
+      - name: Cache Rust builds
         uses: Swatinem/rust-cache@v2
 
-      - name: Check format
-        run: cargo fmt --check
+      - name: Check formatting
+        if: runner.os == 'Linux'
+        run: cargo fmt --all -- --check
 
-      - name: Clippy
-        run: cargo clippy ${{ matrix.cargo_flags }} -- -D warnings
+      - name: Lint
+        run: cargo clippy ${{ matrix.cargo_flags }} --all-targets --locked -- -D warnings
 
-      - name: Run tests
-        run: cargo test ${{ matrix.cargo_flags }}
+      - name: Test
+        run: cargo test ${{ matrix.cargo_flags }} --locked
 
-      - name: Build Windows CMake driver
-        if: matrix.os == 'windows-latest'
+      - name: Build Windows virtual camera
+        if: runner.os == 'Windows'
         run: |
           cmake -S windows/PhoneCamDriver -B build/windows-driver -G "Visual Studio 17 2022" -A x64
           cmake --build build/windows-driver --config Release
 
-  ios-build:
-    name: iOS and CMIO builds
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
+      - name: Upload Windows virtual camera
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: phonecam-windows-driver
+          path: build/windows-driver/Release/PhoneCamDriver.dll
+          if-no-files-found: error
+          retention-days: 7
 
-      - name: Setup Xcode
+  desktop:
+    name: Desktop app
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: rust/phonecam-desktop
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Install desktop build dependencies
+        working-directory: .
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libv4l-dev \
+            pkg-config
+          sudo apt-get install -y libwebkit2gtk-4.1-dev || sudo apt-get install -y libwebkit2gtk-4.0-dev
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: rust/phonecam-desktop/package-lock.json
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust builds
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Audit frontend dependencies
+        run: npm audit --audit-level=high
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Test product flows
+        run: npm test
+
+      - name: Build integrated desktop app
+        run: npm run tauri -- build --debug --no-bundle
+
+      - name: Upload browser test report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-playwright-report
+          path: rust/phonecam-desktop/playwright-report
+          if-no-files-found: ignore
+          retention-days: 7
+
+  android:
+    name: Android app
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: android
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Install Rust with Android targets
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+
+      - name: Cache Rust builds
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Android native toolchain
+        run: |
+          sdkmanager "platforms;android-34" "build-tools;34.0.0" "ndk;26.1.10909125"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/26.1.10909125" >> "$GITHUB_ENV"
+
+      - name: Install Rust Android build tools
+        run: |
+          cargo install cargo-ndk --version 4.1.2 --locked
+          cargo install uniffi --version 0.31.2 --features cli --locked
+
+      - name: Build and test Android app
+        run: ./gradlew --no-daemon --stacktrace testDebugUnitTest assembleDebug
+
+      - name: Upload Android debug APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: phonecam-android-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload Android test report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-test-report
+          path: android/app/build/reports/tests/testDebugUnitTest
+          if-no-files-found: ignore
+          retention-days: 7
+
+  apple:
+    name: iOS app and macOS virtual camera
+    runs-on: macos-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
+
+      - name: Install Rust with Apple targets
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+
+      - name: Cache Rust builds
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build the iOS Rust XCFramework and Swift bindings
+        run: bash ios/build-xcframework.sh
 
       - name: Build iOS app
         run: |
           xcodebuild \
             -project ios/PhoneCam/PhoneCam.xcodeproj \
             -scheme PhoneCam \
-            -configuration Debug \
+            -configuration Release \
             -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO \
             build
 
-      - name: Build macOS CMIO extension
+      - name: Build macOS virtual camera
         run: |
           xcodebuild \
             -project apple/PhoneCamDriver/PhoneCamDriver.xcodeproj \
             -target PhoneCamDriver \
-            -configuration Debug \
+            -configuration Release \
             CODE_SIGNING_ALLOWED=NO \
             build
-
-  android-build:
-    name: Android build
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: android
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-          cache: gradle
-
-      - name: Build and test Android app
-        run: ./gradlew --no-daemon testDebugUnitTest assembleDebug
 
   coverage:
     name: Rust coverage
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+    timeout-minutes: 30
 
-      - name: Install Linux dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            ffmpeg \
-            libavcodec-dev \
-            libavdevice-dev \
-            libavfilter-dev \
-            libavformat-dev \
-            libavutil-dev \
-            libswscale-dev \
-            libv4l-dev \
-            pkg-config
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Rust cache
+      - name: Cache Rust builds
         uses: Swatinem/rust-cache@v2
 
       - name: Install cargo-tarpaulin
-        run: cargo install cargo-tarpaulin --locked
+        run: cargo install cargo-tarpaulin --version 0.37.2 --locked
 
       - name: Generate coverage report
-        run: cargo tarpaulin --workspace --exclude phonecam-desktop --exclude phonecam-driver-linux --timeout 120 --out Xml
+        run: >-
+          cargo tarpaulin
+          --workspace
+          --exclude phonecam-desktop
+          --exclude phonecam-driver-linux
+          --locked
+          --timeout 120
+          --out Xml
 
-      - name: Upload coverage artifact
-        uses: actions/upload-artifact@v4
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v7
         with:
           name: rust-coverage-xml
           path: cobertura.xml
+          if-no-files-found: error
+          retention-days: 7

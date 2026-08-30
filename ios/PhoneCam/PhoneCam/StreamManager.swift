@@ -1,10 +1,21 @@
 import Foundation
 
 final class StreamManager: ObservableObject {
+    struct DesktopEndpoint: Identifiable, Equatable {
+        let name: String
+        let host: String
+        let port: UInt16
+
+        var id: String { "\(host):\(port)" }
+    }
+
     @Published private(set) var statusText = "Idle"
     @Published private(set) var isConnected = false
     @Published var selectedResolution: CaptureResolution = .p720
+    @Published var selectedFps: Int32 = 30
     @Published private(set) var isFrontCamera = false
+    @Published private(set) var discoveredDesktops: [DesktopEndpoint] = []
+    @Published private(set) var isDiscovering = false
 
     private let cameraController: CameraController
     private var encoder: H264Encoder?
@@ -43,14 +54,17 @@ final class StreamManager: ObservableObject {
             self.statusText = "Requesting camera permission…"
         }
 
-        cameraController.requestAccessAndConfigure(resolution: selectedResolution) { [weak self] granted in
+        cameraController.requestAccessAndConfigure(
+            resolution: selectedResolution,
+            fps: selectedFps
+        ) { [weak self] granted in
             guard let self else {
                 return
             }
 
             guard granted else {
                 DispatchQueue.main.async {
-                    self.statusText = "Camera permission denied"
+                    self.statusText = "Camera permission or requested format unavailable"
                     self.isConnected = false
                 }
                 return
@@ -114,23 +128,77 @@ final class StreamManager: ObservableObject {
             return
         }
 
+        reconfigureActiveCapture()
+    }
+
+    func setFrameRate(_ fps: Int32) {
+        guard Self.supportedFrameRates.contains(fps), selectedFps != fps else {
+            return
+        }
+
+        selectedFps = fps
+        guard isStreaming else {
+            return
+        }
+
+        reconfigureActiveCapture()
+    }
+
+    func discoverDesktops() {
+        guard !isDiscovering else {
+            return
+        }
+
+        isDiscovering = true
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let endpoints = Self.readDiscoveredDesktops(timeoutMs: 3_000)
+            DispatchQueue.main.async {
+                self?.discoveredDesktops = endpoints
+                self?.isDiscovering = false
+                if endpoints.isEmpty {
+                    self?.statusText = "No desktops found; scan the desktop QR code"
+                }
+            }
+        }
+    }
+
+    func connect(to desktop: DesktopEndpoint) {
+        endpointHost = desktop.host
+        endpointPort = desktop.port
+
+        if isStreaming {
+            phonecam_transport_shutdown()
+            let connected = initializeTransport()
+            statusText = connected
+                ? "Connected to \(desktop.name)"
+                : "Unable to connect to \(desktop.name)"
+        } else {
+            startStreaming(host: desktop.host, port: desktop.port)
+        }
+    }
+
+    private func reconfigureActiveCapture() {
         cameraController.stopSession()
 
-        cameraController.requestAccessAndConfigure(resolution: resolution) { [weak self] granted in
+        cameraController.requestAccessAndConfigure(
+            resolution: selectedResolution,
+            fps: selectedFps
+        ) { [weak self] granted in
             guard let self else {
                 return
             }
 
             guard granted else {
                 DispatchQueue.main.async {
-                    self.statusText = "Camera permission denied"
+                    self.statusText = "Requested camera format unavailable"
                 }
                 return
             }
 
-            self.configureEncoder(for: resolution)
+            self.configureEncoder(for: self.selectedResolution)
             self.applyVideoDimensionsToRust()
             self.cameraController.startSession()
+            self.encoder?.requestKeyFrame()
 
             DispatchQueue.main.async {
                 self.statusText = self.isConnected
@@ -175,14 +243,14 @@ final class StreamManager: ObservableObject {
                 try encoder.updateConfiguration(
                     width: size.width,
                     height: size.height,
-                    fps: 30,
+                    fps: selectedFps,
                     bitrate: resolution.targetBitrate
                 )
             } else {
                 let newEncoder = H264Encoder(
                     width: size.width,
                     height: size.height,
-                    fps: 30,
+                    fps: selectedFps,
                     bitrate: resolution.targetBitrate
                 )
 
@@ -271,8 +339,39 @@ final class StreamManager: ObservableObject {
         )
     }
 
+    private static func readDiscoveredDesktops(timeoutMs: UInt32) -> [DesktopEndpoint] {
+        guard let ptr = phonecam_discover_desktops(timeoutMs) else {
+            return []
+        }
+        defer { phonecam_string_free(ptr) }
+
+        return String(cString: ptr)
+            .split(whereSeparator: { $0.isNewline })
+            .compactMap { record in
+                let parts = record.split(separator: "|", maxSplits: 3, omittingEmptySubsequences: false)
+                guard
+                    parts.count == 4,
+                    let port = UInt16(parts[2])
+                else {
+                    return nil
+                }
+
+                let name = String(parts[0]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let host = String(parts[1]).trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !host.isEmpty else {
+                    return nil
+                }
+
+                return DesktopEndpoint(
+                    name: name.isEmpty ? "PhoneCam Desktop" : name,
+                    host: host,
+                    port: port
+                )
+            }
+    }
+
     private func streamingStatusText() -> String {
-        "Streaming (\(selectedResolution.rawValue), \(isFrontCamera ? "front" : "back") camera)"
+        "Streaming (\(selectedResolution.rawValue) @ \(selectedFps) FPS, \(isFrontCamera ? "front" : "back") camera)"
     }
 
     private func disconnectedStatusText() -> String {
@@ -300,15 +399,41 @@ final class StreamManager: ObservableObject {
             return
         }
 
-        let command = phonecam_poll_switch_camera_command()
-        switch command {
+        let command = phonecam_poll_control_command()
+        switch UInt8(command & 0xff) {
         case Self.cameraSwitchFrontCommand:
             handleRemoteCameraSwitch(toFront: true)
         case Self.cameraSwitchBackCommand:
             handleRemoteCameraSwitch(toFront: false)
+        case Self.requestKeyframeCommand:
+            encoder?.requestKeyFrame()
+        case Self.configureStreamCommand:
+            let width = UInt16((command >> 8) & 0xffff)
+            let height = UInt16((command >> 24) & 0xffff)
+            let fps = Int32((command >> 40) & 0xff)
+            handleRemoteStreamConfiguration(width: width, height: height, fps: fps)
         default:
             return
         }
+    }
+
+    private func handleRemoteStreamConfiguration(width: UInt16, height: UInt16, fps: Int32) {
+        guard
+            let resolution = CaptureResolution.matching(width: width, height: height),
+            Self.supportedFrameRates.contains(fps)
+        else {
+            statusText = "Desktop requested unsupported stream configuration \(width)x\(height)@\(fps)"
+            return
+        }
+
+        guard resolution != selectedResolution || fps != selectedFps else {
+            encoder?.requestKeyFrame()
+            return
+        }
+
+        selectedResolution = resolution
+        selectedFps = fps
+        reconfigureActiveCapture()
     }
 
     private func handleRemoteCameraSwitch(toFront: Bool) {
@@ -380,6 +505,9 @@ final class StreamManager: ObservableObject {
     }
 
     private static let cameraControlPollInterval: TimeInterval = 0.15
-    private static let cameraSwitchBackCommand: Int8 = 1
-    private static let cameraSwitchFrontCommand: Int8 = 2
+    private static let cameraSwitchBackCommand: UInt8 = 1
+    private static let cameraSwitchFrontCommand: UInt8 = 2
+    private static let requestKeyframeCommand: UInt8 = 3
+    private static let configureStreamCommand: UInt8 = 4
+    private static let supportedFrameRates: Set<Int32> = [15, 30, 60]
 }

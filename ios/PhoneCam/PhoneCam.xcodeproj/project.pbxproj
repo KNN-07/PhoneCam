@@ -11,6 +11,9 @@
 		A1B2C3D4E5F6010000000002 /* PhoneCamApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6020000000003 /* PhoneCamApp.swift */; };
 		A1B2C3D4E5F6010000000003 /* phonecam_mobile_core.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6020000000006 /* phonecam_mobile_core.swift */; };
 		A1B2C3D4E5F6010000000004 /* QRScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6020000000009 /* QRScannerView.swift */; };
+		A1B2C3D4E5F6010000000005 /* CameraController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6020000000010 /* CameraController.swift */; };
+		A1B2C3D4E5F6010000000006 /* H264Encoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6020000000011 /* H264Encoder.swift */; };
+		A1B2C3D4E5F6010000000007 /* StreamManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6020000000012 /* StreamManager.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -23,6 +26,9 @@
 		A1B2C3D4E5F6020000000007 /* phonecam_mobile_coreFFI.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = phonecam_mobile_coreFFI.h; sourceTree = "<group>"; };
 		A1B2C3D4E5F6020000000008 /* phonecam_mobile_coreFFI.modulemap */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.module-map; path = phonecam_mobile_coreFFI.modulemap; sourceTree = "<group>"; };
 		A1B2C3D4E5F6020000000009 /* QRScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRScannerView.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F6020000000010 /* CameraController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraController.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F6020000000011 /* H264Encoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = H264Encoder.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F6020000000012 /* StreamManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamManager.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -55,8 +61,11 @@
 		A1B2C3D4E5F6040000000003 /* PhoneCam */ = {
 			isa = PBXGroup;
 			children = (
+				A1B2C3D4E5F6020000000010 /* CameraController.swift */,
 				A1B2C3D4E5F6020000000002 /* ContentView.swift */,
+				A1B2C3D4E5F6020000000011 /* H264Encoder.swift */,
 				A1B2C3D4E5F6020000000009 /* QRScannerView.swift */,
+				A1B2C3D4E5F6020000000012 /* StreamManager.swift */,
 				A1B2C3D4E5F6020000000003 /* PhoneCamApp.swift */,
 				A1B2C3D4E5F6020000000004 /* Info.plist */,
 				A1B2C3D4E5F6020000000005 /* PhoneCam-Bridging-Header.h */,
@@ -143,8 +152,11 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A1B2C3D4E5F6010000000005 /* CameraController.swift in Sources */,
 				A1B2C3D4E5F6010000000001 /* ContentView.swift in Sources */,
+				A1B2C3D4E5F6010000000006 /* H264Encoder.swift in Sources */,
 				A1B2C3D4E5F6010000000004 /* QRScannerView.swift in Sources */,
+				A1B2C3D4E5F6010000000007 /* StreamManager.swift in Sources */,
 				A1B2C3D4E5F6010000000002 /* PhoneCamApp.swift in Sources */,
 				A1B2C3D4E5F6010000000003 /* phonecam_mobile_core.swift in Sources */,
 			);
@@ -230,15 +242,15 @@
 				);
 				"LIBRARY_SEARCH_PATHS[sdk=iphoneos*][arch=arm64]" = (
 					"$(inherited)",
-					"$(PROJECT_DIR)/../../target/aarch64-apple-ios/$(CONFIGURATION)",
+					"$(PROJECT_DIR)/../../target/aarch64-apple-ios/debug",
 				);
 				"LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*][arch=arm64]" = (
 					"$(inherited)",
-					"$(PROJECT_DIR)/../../target/aarch64-apple-ios-sim/$(CONFIGURATION)",
+					"$(PROJECT_DIR)/../../target/aarch64-apple-ios-sim/debug",
 				);
 				"LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*][arch=x86_64]" = (
 					"$(inherited)",
-					"$(PROJECT_DIR)/../../target/x86_64-apple-ios/$(CONFIGURATION)",
+					"$(PROJECT_DIR)/../../target/x86_64-apple-ios/debug",
 				);
 				MARKETING_VERSION = 1.0;
 				OTHER_LDFLAGS = (
@@ -283,15 +295,15 @@
 				);
 				"LIBRARY_SEARCH_PATHS[sdk=iphoneos*][arch=arm64]" = (
 					"$(inherited)",
-					"$(PROJECT_DIR)/../../target/aarch64-apple-ios/$(CONFIGURATION)",
+					"$(PROJECT_DIR)/../../target/aarch64-apple-ios/release",
 				);
 				"LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*][arch=arm64]" = (
 					"$(inherited)",
-					"$(PROJECT_DIR)/../../target/aarch64-apple-ios-sim/$(CONFIGURATION)",
+					"$(PROJECT_DIR)/../../target/aarch64-apple-ios-sim/release",
 				);
 				"LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*][arch=x86_64]" = (
 					"$(inherited)",
-					"$(PROJECT_DIR)/../../target/x86_64-apple-ios/$(CONFIGURATION)",
+					"$(PROJECT_DIR)/../../target/x86_64-apple-ios/release",
 				);
 				MARKETING_VERSION = 1.0;
 				OTHER_LDFLAGS = (

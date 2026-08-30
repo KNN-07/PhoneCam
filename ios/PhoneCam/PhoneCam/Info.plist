@@ -22,6 +22,12 @@
 	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>PhoneCam needs camera access to stream video and scan QR codes for desktop connection.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>PhoneCam discovers and connects to the PhoneCam desktop app on your local network.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_phonecam._tcp</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

@@ -44,6 +44,8 @@ pub struct AudioFrame {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CameraControl {
     SwitchCamera { front: bool },
+    RequestKeyframe,
+    ConfigureStream { width: u16, height: u16, fps: u8 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

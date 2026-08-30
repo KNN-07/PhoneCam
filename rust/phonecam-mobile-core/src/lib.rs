@@ -1,10 +1,11 @@
-#![allow(dead_code)]
+#![allow(dead_code, clippy::large_const_arrays)]
 
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 
-use phonecam_discovery::parse_qr_code_uri;
+use phonecam_discovery::{parse_qr_code_uri, DiscoveredService, ServiceBrowser};
 use phonecam_protocol::{CameraControl, Message, VideoFrame};
 use phonecam_transport::{ConnectionState, PhoneCamClient, TransportConnection};
 use tokio::runtime::{Builder, Runtime};
@@ -50,6 +51,12 @@ static TRANSPORT_CLIENT: OnceLock<Mutex<Option<TransportClient>>> = OnceLock::ne
 const CAMERA_SWITCH_NONE: i8 = 0;
 const CAMERA_SWITCH_BACK: i8 = 1;
 const CAMERA_SWITCH_FRONT: i8 = 2;
+const CONTROL_NONE: u64 = 0;
+const CONTROL_SWITCH_BACK: u64 = 1;
+const CONTROL_SWITCH_FRONT: u64 = 2;
+const CONTROL_REQUEST_KEYFRAME: u64 = 3;
+const CONTROL_CONFIGURE_STREAM: u64 = 4;
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 
 fn last_frame_slot() -> &'static Mutex<Option<FrameMetadata>> {
     LAST_FRAME.get_or_init(|| Mutex::new(None))
@@ -142,9 +149,13 @@ fn initialize_transport_client(host: String, port: u16) -> bool {
         Err(_) => return false,
     };
 
-    let connection = match runtime.block_on(PhoneCamClient::connect(endpoint.clone())) {
-        Ok(connection) => connection,
+    let connection = match runtime.block_on(tokio::time::timeout(
+        CONNECT_TIMEOUT,
+        PhoneCamClient::connect(endpoint),
+    )) {
+        Ok(Ok(connection)) => connection,
         Err(_) => return false,
+        Ok(Err(_)) => return false,
     };
 
     if let Ok(mut slot) = transport_client_slot().lock() {
@@ -290,6 +301,7 @@ pub extern "C" fn phonecam_poll_switch_camera_command() -> i8 {
                     CAMERA_SWITCH_BACK
                 }
             }
+            Ok(Message::CameraControl(_)) => continue,
             Ok(Message::Disconnect(_)) => {
                 *slot = None;
                 return CAMERA_SWITCH_NONE;
@@ -302,6 +314,53 @@ pub extern "C" fn phonecam_poll_switch_camera_command() -> i8 {
                 *slot = None;
                 return CAMERA_SWITCH_NONE;
             }
+        }
+    }
+}
+
+/// Poll the next desktop-to-mobile stream control command.
+///
+/// The low byte contains the command code: 0 = none, 1 = back camera,
+/// 2 = front camera, 3 = request keyframe, 4 = configure stream. For a
+/// configure command, bits 8..23 contain width, 24..39 height, and 40..47 FPS.
+#[no_mangle]
+pub extern "C" fn phonecam_poll_control_command() -> u64 {
+    let mut slot = match transport_client_slot().lock() {
+        Ok(slot) => slot,
+        Err(_) => return CONTROL_NONE,
+    };
+
+    let Some(client) = slot.as_mut() else {
+        return CONTROL_NONE;
+    };
+
+    loop {
+        match client.connection.receiver().try_recv() {
+            Ok(Message::CameraControl(control)) => return pack_control_command(&control),
+            Ok(Message::Disconnect(_)) => {
+                *slot = None;
+                return CONTROL_NONE;
+            }
+            Ok(_) => continue,
+            Err(TryRecvError::Empty) => return CONTROL_NONE,
+            Err(TryRecvError::Disconnected) => {
+                *slot = None;
+                return CONTROL_NONE;
+            }
+        }
+    }
+}
+
+fn pack_control_command(control: &CameraControl) -> u64 {
+    match control {
+        CameraControl::SwitchCamera { front: true } => CONTROL_SWITCH_FRONT,
+        CameraControl::SwitchCamera { front: false } => CONTROL_SWITCH_BACK,
+        CameraControl::RequestKeyframe => CONTROL_REQUEST_KEYFRAME,
+        CameraControl::ConfigureStream { width, height, fps } => {
+            CONTROL_CONFIGURE_STREAM
+                | (u64::from(*width) << 8)
+                | (u64::from(*height) << 24)
+                | (u64::from(*fps) << 40)
         }
     }
 }
@@ -344,6 +403,43 @@ pub unsafe extern "C" fn phonecam_parse_qr_code_uri(uri: *const c_char) -> *mut 
     CString::new(format!("{}|{}|{}", parsed.ip, parsed.port, parsed.name))
         .map(CString::into_raw)
         .unwrap_or(std::ptr::null_mut())
+}
+
+/// Discover PhoneCam desktop services over mDNS and return newline-delimited records.
+///
+/// Each record uses `name|ip|port|version`. The returned string must be released
+/// with [`phonecam_string_free`]. A null pointer indicates discovery failure.
+#[no_mangle]
+pub extern "C" fn phonecam_discover_desktops(timeout_ms: u32) -> *mut c_char {
+    let timeout = Duration::from_millis(u64::from(timeout_ms.clamp(100, 5_000)));
+    let runtime = match Builder::new_current_thread().enable_all().build() {
+        Ok(runtime) => runtime,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let browser = match ServiceBrowser::new() {
+        Ok(browser) => browser,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    let services = match runtime.block_on(browser.discover(timeout)) {
+        Ok(services) => services,
+        Err(_) => return std::ptr::null_mut(),
+    };
+
+    CString::new(format_discovered_services(&services))
+        .map(CString::into_raw)
+        .unwrap_or(std::ptr::null_mut())
+}
+
+fn format_discovered_services(services: &[DiscoveredService]) -> String {
+    services
+        .iter()
+        .map(|service| {
+            let name = service.name.replace(['|', '\n', '\r'], " ");
+            let version = service.version.replace(['|', '\n', '\r'], " ");
+            format!("{name}|{}|{}|{version}", service.ip, service.port)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[no_mangle]
@@ -391,6 +487,7 @@ uniffi::include_scaffolding!("phonecam");
 mod tests {
     use super::*;
     use std::ffi::{CStr, CString};
+    use std::net::{IpAddr, Ipv4Addr};
     use std::sync::{Mutex, OnceLock};
 
     static TEST_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
@@ -506,5 +603,46 @@ mod tests {
 
         let ptr = unsafe { phonecam_parse_qr_code_uri(uri.as_ptr()) };
         assert!(ptr.is_null(), "expected null pointer for invalid QR URI");
+    }
+
+    #[test]
+    fn control_commands_have_stable_ffi_encoding() {
+        assert_eq!(
+            pack_control_command(&CameraControl::SwitchCamera { front: false }),
+            CONTROL_SWITCH_BACK
+        );
+        assert_eq!(
+            pack_control_command(&CameraControl::SwitchCamera { front: true }),
+            CONTROL_SWITCH_FRONT
+        );
+        assert_eq!(
+            pack_control_command(&CameraControl::RequestKeyframe),
+            CONTROL_REQUEST_KEYFRAME
+        );
+
+        let packed = pack_control_command(&CameraControl::ConfigureStream {
+            width: 1920,
+            height: 1080,
+            fps: 60,
+        });
+        assert_eq!(packed & 0xff, CONTROL_CONFIGURE_STREAM);
+        assert_eq!((packed >> 8) & 0xffff, 1920);
+        assert_eq!((packed >> 24) & 0xffff, 1080);
+        assert_eq!((packed >> 40) & 0xff, 60);
+    }
+
+    #[test]
+    fn discovered_services_use_stable_line_protocol() {
+        let services = vec![DiscoveredService {
+            name: "Office|Desktop".to_string(),
+            ip: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 20)),
+            port: 7878,
+            version: "0.1.0".to_string(),
+        }];
+
+        assert_eq!(
+            format_discovered_services(&services),
+            "Office Desktop|192.168.1.20|7878|0.1.0"
+        );
     }
 }

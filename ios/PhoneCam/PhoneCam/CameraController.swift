@@ -3,6 +3,7 @@ import Combine
 import Foundation
 
 enum CaptureResolution: String, CaseIterable, Identifiable {
+    case p480 = "480p"
     case p720 = "720p"
     case p1080 = "1080p"
 
@@ -10,6 +11,8 @@ enum CaptureResolution: String, CaseIterable, Identifiable {
 
     var dimensions: (width: Int32, height: Int32) {
         switch self {
+        case .p480:
+            return (640, 480)
         case .p720:
             return (1280, 720)
         case .p1080:
@@ -24,6 +27,8 @@ enum CaptureResolution: String, CaseIterable, Identifiable {
 
     var sessionPreset: AVCaptureSession.Preset {
         switch self {
+        case .p480:
+            return .vga640x480
         case .p720:
             return .hd1280x720
         case .p1080:
@@ -33,10 +38,19 @@ enum CaptureResolution: String, CaseIterable, Identifiable {
 
     var targetBitrate: Int {
         switch self {
+        case .p480:
+            return 2_000_000
         case .p720:
             return 4_000_000
         case .p1080:
             return 5_000_000
+        }
+    }
+
+    static func matching(width: UInt16, height: UInt16) -> CaptureResolution? {
+        allCases.first { resolution in
+            let dimensions = resolution.dimensionsU16
+            return dimensions.width == width && dimensions.height == height
         }
     }
 }
@@ -61,6 +75,7 @@ final class CameraController: NSObject, ObservableObject {
 
     private var isConfigured = false
     private var configuredResolution: CaptureResolution = .p720
+    private var configuredFps: Int32 = 30
     private var notificationTokens: [NSObjectProtocol] = []
 
     deinit {
@@ -69,6 +84,7 @@ final class CameraController: NSObject, ObservableObject {
 
     func requestAccessAndConfigure(
         resolution: CaptureResolution,
+        fps: Int32,
         completion: @escaping (Bool) -> Void
     ) {
         let status = AVCaptureDevice.authorizationStatus(for: .video)
@@ -78,7 +94,7 @@ final class CameraController: NSObject, ObservableObject {
 
         switch status {
         case .authorized:
-            configureSession(for: resolution, completion: completion)
+            configureSession(for: resolution, fps: fps, completion: completion)
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
                 guard let self else {
@@ -96,7 +112,7 @@ final class CameraController: NSObject, ObservableObject {
                     return
                 }
 
-                self.configureSession(for: resolution, completion: completion)
+                self.configureSession(for: resolution, fps: fps, completion: completion)
             }
         case .denied, .restricted:
             DispatchQueue.main.async {
@@ -169,48 +185,37 @@ final class CameraController: NSObject, ObservableObject {
             }
 
             self.session.beginConfiguration()
-            defer {
-                self.session.commitConfiguration()
-            }
-
             self.session.removeInput(currentInput)
 
+            var switched = false
             do {
                 let replacementInput = try AVCaptureDeviceInput(device: replacementDevice)
-                guard self.session.canAddInput(replacementInput) else {
-                    if self.session.canAddInput(currentInput) {
-                        self.session.addInput(currentInput)
-                    }
+                if self.session.canAddInput(replacementInput) {
+                    self.session.addInput(replacementInput)
 
-                    if wasRunning {
-                        self.session.startRunning()
+                    if Self.applyCaptureFormat(
+                        resolution: self.configuredResolution,
+                        fps: self.configuredFps,
+                        to: replacementDevice
+                    ) {
+                        self.activeCameraPosition = replacementDevice.position
+                        self.configureVideoOutputConnection()
+                        switched = true
+                    } else {
+                        self.session.removeInput(replacementInput)
                     }
-
-                    DispatchQueue.main.async {
-                        completion(false, self.isUsingFrontCamera)
-                    }
-                    return
                 }
-
-                self.session.addInput(replacementInput)
-                self.activeCameraPosition = replacementDevice.position
-                self.configureVideoOutputConnection()
             } catch {
-                if self.session.canAddInput(currentInput) {
-                    self.session.addInput(currentInput)
-                    self.activeCameraPosition = currentInput.device.position
-                    self.configureVideoOutputConnection()
-                }
-
-                if wasRunning {
-                    self.session.startRunning()
-                }
-
-                DispatchQueue.main.async {
-                    completion(false, self.isUsingFrontCamera)
-                }
-                return
+                switched = false
             }
+
+            if !switched, self.session.canAddInput(currentInput) {
+                self.session.addInput(currentInput)
+                self.activeCameraPosition = currentInput.device.position
+                self.configureVideoOutputConnection()
+            }
+
+            self.session.commitConfiguration()
 
             if wasRunning {
                 self.session.startRunning()
@@ -218,19 +223,24 @@ final class CameraController: NSObject, ObservableObject {
 
             DispatchQueue.main.async {
                 self.isSessionRunning = self.session.isRunning
-                completion(true, self.isUsingFrontCamera)
+                completion(switched, self.isUsingFrontCamera)
             }
         }
     }
 
     private func configureSession(
         for resolution: CaptureResolution,
+        fps: Int32,
         completion: @escaping (Bool) -> Void
     ) {
         sessionQueue.async {
             let wasRunning = self.session.isRunning
 
-            if self.isConfigured, self.configuredResolution == resolution {
+            if
+                self.isConfigured,
+                self.configuredResolution == resolution,
+                self.configuredFps == fps
+            {
                 DispatchQueue.main.async {
                     completion(true)
                 }
@@ -241,6 +251,7 @@ final class CameraController: NSObject, ObservableObject {
             defer {
                 self.session.commitConfiguration()
             }
+            self.isConfigured = false
 
             if self.session.canSetSessionPreset(resolution.sessionPreset) {
                 self.session.sessionPreset = resolution.sessionPreset
@@ -274,6 +285,17 @@ final class CameraController: NSObject, ObservableObject {
 
                 self.session.addInput(cameraInput)
                 self.activeCameraPosition = cameraDevice.position
+
+                if self.session.canSetSessionPreset(.inputPriority) {
+                    self.session.sessionPreset = .inputPriority
+                }
+
+                guard Self.applyCaptureFormat(resolution: resolution, fps: fps, to: cameraDevice) else {
+                    DispatchQueue.main.async {
+                        completion(false)
+                    }
+                    return
+                }
             } catch {
                 DispatchQueue.main.async {
                     completion(false)
@@ -299,6 +321,7 @@ final class CameraController: NSObject, ObservableObject {
 
             self.isConfigured = true
             self.configuredResolution = resolution
+            self.configuredFps = fps
             self.registerSessionObserversIfNeeded()
 
             if wasRunning, !self.session.isRunning {
@@ -333,6 +356,48 @@ final class CameraController: NSObject, ObservableObject {
                 mediaType: .video,
                 position: position
             ).devices.first
+    }
+
+    private static func applyCaptureFormat(
+        resolution: CaptureResolution,
+        fps: Int32,
+        to device: AVCaptureDevice
+    ) -> Bool {
+        let requestedFps = Double(fps)
+        let dimensions = resolution.dimensions
+        guard
+            fps > 0,
+            let format = device.formats
+                .filter({ format in
+                    let formatDimensions = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+                    return
+                        formatDimensions.width == dimensions.width
+                        && formatDimensions.height == dimensions.height
+                        && format.videoSupportedFrameRateRanges.contains(where: { range in
+                            range.minFrameRate <= requestedFps && requestedFps <= range.maxFrameRate
+                        })
+                })
+                .max(by: { lhs, rhs in
+                    let lhsMaximum = lhs.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 0
+                    let rhsMaximum = rhs.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 0
+                    return lhsMaximum < rhsMaximum
+                })
+        else {
+            return false
+        }
+
+        do {
+            try device.lockForConfiguration()
+            defer { device.unlockForConfiguration() }
+
+            device.activeFormat = format
+            let frameDuration = CMTime(value: 1, timescale: fps)
+            device.activeVideoMinFrameDuration = frameDuration
+            device.activeVideoMaxFrameDuration = frameDuration
+            return true
+        } catch {
+            return false
+        }
     }
 
     private func registerSessionObserversIfNeeded() {

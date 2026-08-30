@@ -110,29 +110,41 @@ bool FrameReceiver::TryGetLatestFrame(PhoneCamFrame* frame) const {
 void FrameReceiver::ReceiverLoop() {
 #if defined(_WIN32)
     while (running_.load()) {
-        const BOOL wait_result = WaitNamedPipeW(kPipeName, 1000);
-        if (!wait_result) {
-            const DWORD wait_error = GetLastError();
-            if (wait_error != ERROR_FILE_NOT_FOUND && wait_error != ERROR_PIPE_BUSY &&
-                wait_error != ERROR_SEM_TIMEOUT) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        HANDLE pipe_handle = CreateNamedPipeW(
+            kPipeName,
+            PIPE_ACCESS_INBOUND,
+            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_NOWAIT | PIPE_REJECT_REMOTE_CLIENTS,
+            1,
+            0,
+            static_cast<DWORD>(kReadBufferSize),
+            250,
+            nullptr);
+        if (pipe_handle == INVALID_HANDLE_VALUE) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(250));
+            continue;
+        }
+
+        bool connected = false;
+        while (running_.load() && !connected) {
+            if (ConnectNamedPipe(pipe_handle, nullptr)) {
+                connected = true;
+                break;
             }
 
-            continue;
+            const DWORD connect_error = GetLastError();
+            if (connect_error == ERROR_PIPE_CONNECTED) {
+                connected = true;
+            } else if (connect_error == ERROR_PIPE_LISTENING || connect_error == ERROR_NO_DATA) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            } else {
+                break;
+            }
         }
 
-        void* pipe_handle = reinterpret_cast<void*>(
-            CreateFileW(kPipeName, GENERIC_READ, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
-
-        if (pipe_handle == INVALID_HANDLE_VALUE) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(200));
-            continue;
+        if (connected) {
+            ReadFromPipe(pipe_handle);
+            DisconnectNamedPipe(pipe_handle);
         }
-
-        DWORD mode = PIPE_READMODE_BYTE;
-        SetNamedPipeHandleState(pipe_handle, &mode, nullptr, nullptr);
-
-        ReadFromPipe(pipe_handle);
         CloseHandle(pipe_handle);
     }
 #else
@@ -159,6 +171,10 @@ bool FrameReceiver::ReadFromPipe(void* pipe_handle) {
             const DWORD read_error = GetLastError();
             if (read_error == ERROR_BROKEN_PIPE || read_error == ERROR_PIPE_NOT_CONNECTED) {
                 return true;
+            }
+            if (read_error == ERROR_NO_DATA) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                continue;
             }
 
             return false;

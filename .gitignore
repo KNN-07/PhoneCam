@@ -20,8 +20,7 @@ Thumbs.db
 /target
 **/target/
 
-# Rust lock file (workspace has no published crates)
-Cargo.lock
+# Cargo.lock is committed because this workspace ships applications.
 
 # Android SDK (local install, should not be committed)
 .android-sdk/

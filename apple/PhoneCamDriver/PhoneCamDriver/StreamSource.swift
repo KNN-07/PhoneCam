@@ -13,14 +13,14 @@ final class PhoneCamStreamSource: NSObject, CMIOExtensionStreamSource {
     )
 
     private let device: CMIOExtensionDevice
-    private let streamFormat: CMIOExtensionStreamFormat
+    private let streamFormats: [CMIOExtensionStreamFormat]
 
     private var configuredFrameDuration = CMTime(value: 1, timescale: 30)
 
     init(
         localizedName: String,
         streamID: UUID,
-        streamFormat: CMIOExtensionStreamFormat,
+        streamFormats: [CMIOExtensionStreamFormat],
         device: CMIOExtensionDevice,
         clientQueue: DispatchQueue = DispatchQueue(
             label: "com.phonecam.driver.cameraextension.streamsource",
@@ -28,7 +28,8 @@ final class PhoneCamStreamSource: NSObject, CMIOExtensionStreamSource {
         )
     ) {
         self.device = device
-        self.streamFormat = streamFormat
+        precondition(!streamFormats.isEmpty, "PhoneCam must expose at least one stream format")
+        self.streamFormats = streamFormats
         self.clientQueue = clientQueue
 
         super.init()
@@ -43,14 +44,14 @@ final class PhoneCamStreamSource: NSObject, CMIOExtensionStreamSource {
     }
 
     var formats: [CMIOExtensionStreamFormat] {
-        [streamFormat]
+        streamFormats
     }
 
-    var activeFormatIndex: Int = 0 {
+    var activeFormatIndex: Int = 1 {
         didSet {
-            if activeFormatIndex != 0 {
-                logger.error("PhoneCam only supports a single active format index")
-                activeFormatIndex = 0
+            if !streamFormats.indices.contains(activeFormatIndex) {
+                logger.error("Unsupported PhoneCam stream format index: \(self.activeFormatIndex)")
+                activeFormatIndex = min(1, streamFormats.count - 1)
             }
         }
     }

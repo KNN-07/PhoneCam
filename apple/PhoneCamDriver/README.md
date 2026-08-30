@@ -26,7 +26,7 @@ Tauri Desktop App → IPC (UNIX Socket) → Camera Extension → CMIO → System
 Frames are sent from the Tauri app via UNIX socket in the App Group container:
 
 ```
-Socket Path: /private/var/mobile/Containers/Shared/AppGroup/[UUID]/phonecam.sock
+Socket Path: ~/Library/Group Containers/group.com.phonecam.shared/phonecam.sock
 
 Frame Format:
 [4 bytes]  width (uint32, little-endian)
@@ -74,24 +74,15 @@ xcodebuild -project PhoneCamDriver.xcodeproj \
 
 ## Installation
 
-The Camera Extension is embedded in the PhoneCam desktop app bundle. When the app is installed:
+The Xcode target builds `PhoneCamDriver.systemextension`. A signed release must embed it at
+`PhoneCam.app/Contents/Library/SystemExtensions/PhoneCamDriver.systemextension`, then the
+containing app must submit an `OSSystemExtensionRequest.activationRequest` for
+`com.phonecam.driver.cameraextension`. The user approves the request in System Settings →
+Privacy & Security.
 
-1. The `.appex` bundle is copied to the app's PlugIns directory
-2. On first launch, the app prompts to enable the extension
-3. User must approve in System Settings → Privacy & Security
-
-### Manual Installation (Development)
-
-```bash
-# Install the extension
-systemextensionsctl install PhoneCamDriver.appex
-
-# List installed extensions
-systemextensionsctl list
-
-# Uninstall
-systemextensionsctl uninstall com.phonecam.driver.cameraextension
-```
+Embedding, signing, and activation are native release gates and are not automated by the
+current Tauri bundle. `systemextensionsctl list` can be used to inspect activation state; it is
+not an installer for a standalone camera extension.
 
 ## Configuration
 

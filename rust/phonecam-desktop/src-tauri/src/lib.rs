@@ -1,17 +1,14 @@
-use std::{
-    net::IpAddr,
-    sync::{Arc, Mutex},
-};
+use std::net::IpAddr;
 
 use local_ip_address::list_afinet_netifas;
-use phonecam_discovery::{format_qr_code_uri, DiscoveredService, ServiceBrowser};
-use phonecam_protocol::{CameraControl, Message};
+use phonecam_discovery::format_qr_code_uri;
 use qrcode::{render::svg, QrCode};
-use tauri::State;
+use tauri::{Manager, State};
 
 pub mod adb;
 pub mod convert;
 pub mod decode;
+mod output;
 pub mod pipeline;
 
 #[cfg(target_os = "macos")]
@@ -22,7 +19,6 @@ pub mod driver_windows;
 
 pub struct AppState {
     pub pipeline: pipeline::PipelineManager,
-    pub discovered_devices: Arc<Mutex<Vec<DiscoveredService>>>,
 }
 
 const DEFAULT_QR_DEVICE_NAME: &str = "PhoneCam Desktop";
@@ -104,7 +100,7 @@ fn connection_target_from_input(ip: &str) -> ConnectionTarget {
 }
 
 #[tauri::command]
-pub async fn connect(state: State<'_, AppState>, ip: String, port: u16) -> Result<(), String> {
+async fn connect(state: State<'_, AppState>, ip: String, port: u16) -> Result<(), String> {
     let listen_port = if port == 0 {
         pipeline::DEFAULT_LISTEN_PORT
     } else {
@@ -120,18 +116,45 @@ pub async fn connect(state: State<'_, AppState>, ip: String, port: u16) -> Resul
 }
 
 #[tauri::command]
-pub async fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
+async fn disconnect(state: State<'_, AppState>) -> Result<(), String> {
     state.pipeline.stop().await
 }
 
 #[tauri::command]
-pub async fn switch_camera(state: State<'_, AppState>, front: bool) -> Result<(), String> {
-    let _message = Message::CameraControl(CameraControl::SwitchCamera { front });
+async fn switch_camera(state: State<'_, AppState>, front: bool) -> Result<(), String> {
     state
         .pipeline
         .switch_camera(front)
         .await
         .map_err(|err| format!("failed to send camera switch command: {err}"))
+}
+
+#[tauri::command]
+async fn configure_stream(
+    state: State<'_, AppState>,
+    width: u16,
+    height: u16,
+    fps: u8,
+) -> Result<(), String> {
+    validate_stream_configuration(width, height, fps)?;
+    state
+        .pipeline
+        .configure_stream(width, height, fps)
+        .await
+        .map_err(|err| format!("failed to configure phone stream: {err}"))
+}
+
+fn validate_stream_configuration(width: u16, height: u16, fps: u8) -> Result<(), String> {
+    const RESOLUTIONS: &[(u16, u16)] = &[(640, 480), (1280, 720), (1920, 1080)];
+    const FRAME_RATES: &[u8] = &[15, 30, 60];
+
+    if !RESOLUTIONS.contains(&(width, height)) {
+        return Err(format!("unsupported resolution {width}x{height}"));
+    }
+    if !FRAME_RATES.contains(&fps) {
+        return Err(format!("unsupported frame rate {fps}"));
+    }
+    Ok(())
 }
 
 #[derive(serde::Serialize)]
@@ -142,7 +165,7 @@ pub struct Status {
 }
 
 #[tauri::command]
-pub async fn get_status(state: State<'_, AppState>) -> Result<Status, String> {
+async fn get_status(state: State<'_, AppState>) -> Result<Status, String> {
     let pipeline_status = state.pipeline.status().await;
 
     Ok(Status {
@@ -152,28 +175,8 @@ pub async fn get_status(state: State<'_, AppState>) -> Result<Status, String> {
     })
 }
 
-#[derive(serde::Serialize)]
-pub struct DeviceInfo {
-    pub name: String,
-    pub ip: String,
-    pub port: u16,
-}
-
 #[tauri::command]
-pub fn get_discovered_devices(state: State<'_, AppState>) -> Vec<DeviceInfo> {
-    let devices = state.discovered_devices.lock().unwrap();
-    devices
-        .iter()
-        .map(|d| DeviceInfo {
-            name: d.name.clone(),
-            ip: d.ip.to_string(),
-            port: d.port,
-        })
-        .collect()
-}
-
-#[tauri::command]
-pub fn generate_qr_code() -> Result<String, String> {
+fn generate_qr_code() -> Result<String, String> {
     let uris = qr_connection_uris()?;
     let primary_uri = uris
         .first()
@@ -189,41 +192,16 @@ pub fn generate_qr_code() -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn get_qr_connection_uris() -> Result<Vec<String>, String> {
+fn get_qr_connection_uris() -> Result<Vec<String>, String> {
     qr_connection_uris()
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let discovered_devices = Arc::new(Mutex::new(Vec::new()));
     let pipeline = pipeline::PipelineManager::new();
 
     tauri::Builder::default()
         .setup(move |app| {
-            let discovered_devices_for_discovery = discovered_devices.clone();
-            tokio::spawn(async move {
-                let browser = match ServiceBrowser::new() {
-                    Ok(b) => b,
-                    Err(e) => {
-                        eprintln!("Failed to create ServiceBrowser: {}", e);
-                        return;
-                    }
-                };
-
-                loop {
-                    match browser.discover(std::time::Duration::from_secs(3)).await {
-                        Ok(services) => {
-                            let mut devices = discovered_devices_for_discovery.lock().unwrap();
-                            *devices = services;
-                        }
-                        Err(e) => {
-                            eprintln!("Discovery error: {}", e);
-                        }
-                    }
-                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                }
-            });
-
             let pipeline_for_start = pipeline.clone();
             tokio::spawn(async move {
                 if let Err(err) = pipeline_for_start
@@ -236,7 +214,6 @@ pub fn run() {
 
             app.manage(AppState {
                 pipeline: pipeline.clone(),
-                discovered_devices: discovered_devices.clone(),
             });
             Ok(())
         })
@@ -244,8 +221,8 @@ pub fn run() {
             connect,
             disconnect,
             switch_camera,
+            configure_stream,
             get_status,
-            get_discovered_devices,
             generate_qr_code,
             get_qr_connection_uris
         ])
@@ -256,31 +233,13 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::{IpAddr, Ipv4Addr};
 
     #[test]
-    fn test_device_info_mapping() {
-        let service = DiscoveredService {
-            name: "PhoneCam Test".to_string(),
-            ip: IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100)),
-            port: 8080,
-            version: "0.1.0".to_string(),
-        };
-
-        let services = vec![service];
-
-        let infos: Vec<DeviceInfo> = services
-            .iter()
-            .map(|d| DeviceInfo {
-                name: d.name.clone(),
-                ip: d.ip.to_string(),
-                port: d.port,
-            })
-            .collect();
-
-        assert_eq!(infos.len(), 1);
-        assert_eq!(infos[0].name, "PhoneCam Test");
-        assert_eq!(infos[0].ip, "192.168.1.100");
-        assert_eq!(infos[0].port, 8080);
+    fn stream_configuration_only_accepts_v1_presets() {
+        assert!(validate_stream_configuration(640, 480, 15).is_ok());
+        assert!(validate_stream_configuration(1280, 720, 30).is_ok());
+        assert!(validate_stream_configuration(1920, 1080, 60).is_ok());
+        assert!(validate_stream_configuration(800, 600, 30).is_err());
+        assert!(validate_stream_configuration(1280, 720, 24).is_err());
     }
 }

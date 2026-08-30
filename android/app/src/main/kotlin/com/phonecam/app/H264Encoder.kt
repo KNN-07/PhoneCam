@@ -158,8 +158,9 @@ class H264Encoder(
                         outputBuffer.position(bufferInfo.offset)
                         outputBuffer.limit(bufferInfo.offset + bufferInfo.size)
 
-                        val nalUnit = ByteArray(bufferInfo.size)
-                        outputBuffer.get(nalUnit)
+                        val encodedPayload = ByteArray(bufferInfo.size)
+                        outputBuffer.get(encodedPayload)
+                        val nalUnit = H264NalUnit.toAnnexB(encodedPayload)
 
                         val isCodecConfig =
                             (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0

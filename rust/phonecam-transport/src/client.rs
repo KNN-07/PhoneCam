@@ -213,7 +213,7 @@ fn default_handshake(role_name: &str) -> Message {
     Message::Handshake(Handshake {
         version: 1,
         device_name: format!("phonecam-{role_name}"),
-        supported_resolutions: vec![(1920, 1080)],
-        supported_fps: vec![30],
+        supported_resolutions: vec![(640, 480), (1280, 720), (1920, 1080)],
+        supported_fps: vec![15, 30, 60],
     })
 }

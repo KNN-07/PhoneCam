@@ -140,7 +140,7 @@ The filter supports the following formats:
 
 - **NV12**: Primary format (420 planar, 8-bit)
 - **YUY2/YUYV**: Secondary format (packed YUV)
-- **Resolutions**: 1280x720 (720p), 1920x1080 (1080p)
+- **Resolutions**: 640x480 (480p), 1280x720 (720p), 1920x1080 (1080p)
 - **Frame Rate**: 30 FPS (configurable)
 
 ## Security Notes

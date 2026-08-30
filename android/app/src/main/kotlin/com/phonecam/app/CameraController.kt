@@ -2,6 +2,7 @@ package com.phonecam.app
 
 import android.content.Context
 import android.util.Log
+import android.util.Range
 import android.util.Size
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
@@ -32,6 +33,7 @@ class CameraController(
     fun start(
         previewView: PreviewView,
         targetResolution: Size,
+        targetFps: Int,
         onFrame: (ImageProxy) -> Unit,
         onError: (Throwable) -> Unit = {},
     ) {
@@ -47,6 +49,7 @@ class CameraController(
                             useFrontCamera = false,
                             previewView = previewView,
                             targetResolution = targetResolution,
+                            targetFps = targetFps,
                             onFrame = onFrame,
                         )
                 }.onFailure {
@@ -62,6 +65,7 @@ class CameraController(
         useFrontCamera: Boolean,
         previewView: PreviewView,
         targetResolution: Size,
+        targetFps: Int,
         onFrame: (ImageProxy) -> Unit,
     ): Boolean {
         val provider = cameraProvider ?: throw IllegalStateException("Camera provider is not initialized")
@@ -76,6 +80,7 @@ class CameraController(
                         useFrontCamera = useFrontCamera,
                         previewView = previewView,
                         targetResolution = targetResolution,
+                        targetFps = targetFps,
                         onFrame = onFrame,
                     )
                 }
@@ -97,6 +102,7 @@ class CameraController(
         useFrontCamera: Boolean,
         previewView: PreviewView,
         targetResolution: Size,
+        targetFps: Int,
         onFrame: (ImageProxy) -> Unit,
     ): Boolean {
         val cameraSelector = selectCameraSelector(provider, useFrontCamera)
@@ -104,6 +110,7 @@ class CameraController(
         val preview =
             Preview.Builder()
                 .setTargetResolution(targetResolution)
+                .setTargetFrameRate(Range(targetFps, targetFps))
                 .build()
                 .also {
                     it.setSurfaceProvider(previewView.surfaceProvider)

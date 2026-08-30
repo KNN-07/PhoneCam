@@ -1,12 +1,10 @@
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     panic::{catch_unwind, AssertUnwindSafe},
-    path::PathBuf,
     sync::Arc,
 };
 
 use phonecam_discovery::ServicePublisher;
-use phonecam_driver_linux::{ensure_v4l2loopback_loaded, list_devices, PixelFormat, V4l2Device};
 use phonecam_protocol::{CameraControl, Message, VideoFrame};
 use phonecam_transport::{ConnectionState, PhoneCamServer, TransportConnection};
 use tokio::{
@@ -14,7 +12,7 @@ use tokio::{
     task::JoinHandle,
 };
 
-use crate::{adb::AdbManager, convert::Nv12ToYuyvConverter, decode::H264Decoder};
+use crate::{adb::AdbManager, decode::H264Decoder, output::OutputDevice};
 
 pub const DEFAULT_LISTEN_PORT: u16 = 7_878;
 const DEFAULT_DEVICE_NAME: &str = "PhoneCam Desktop";
@@ -133,9 +131,9 @@ impl PipelineManager {
             PipelineStartMode::Usb { serial } => {
                 let selected_serial = self
                     .adb_manager
-                    .forward(listen_port, listen_port, serial.as_deref())
+                    .reverse(listen_port, listen_port, serial.as_deref())
                     .await
-                    .map_err(|err| format!("failed to set up ADB USB forward: {err}"))?;
+                    .map_err(|err| format!("failed to set up ADB USB reverse tunnel: {err}"))?;
 
                 Some(UsbForwardSession {
                     serial: selected_serial,
@@ -196,11 +194,11 @@ impl PipelineManager {
         if let Some(usb_forward) = usb_forward {
             if let Err(err) = self
                 .adb_manager
-                .kill_forward(usb_forward.local_port, Some(&usb_forward.serial))
+                .kill_reverse(usb_forward.local_port, Some(&usb_forward.serial))
                 .await
             {
                 log::warn!(
-                    "failed to remove ADB forward for {} on tcp:{}: {}",
+                    "failed to remove ADB reverse tunnel for {} on tcp:{}: {}",
                     usb_forward.serial,
                     usb_forward.local_port,
                     err
@@ -216,10 +214,21 @@ impl PipelineManager {
 
     pub async fn status(&self) -> PipelineStatus {
         let runtime = self.runtime.lock().await;
-        runtime.status_rx.borrow().clone()
+        let status = runtime.status_rx.borrow().clone();
+        status
     }
 
     pub async fn switch_camera(&self, front: bool) -> Result<(), String> {
+        self.send_camera_control(CameraControl::SwitchCamera { front })
+            .await
+    }
+
+    pub async fn configure_stream(&self, width: u16, height: u16, fps: u8) -> Result<(), String> {
+        self.send_camera_control(CameraControl::ConfigureStream { width, height, fps })
+            .await
+    }
+
+    async fn send_camera_control(&self, control: CameraControl) -> Result<(), String> {
         let active_connection_sender = {
             let runtime = self.runtime.lock().await;
             runtime.active_connection_sender.clone()
@@ -232,11 +241,15 @@ impl PipelineManager {
         .ok_or_else(|| "no active phone connection for camera switch".to_string())?;
 
         sender
-            .send(Message::CameraControl(CameraControl::SwitchCamera {
-                front,
-            }))
+            .send(Message::CameraControl(control))
             .await
-            .map_err(|_| "failed to send camera switch command: connection closed".to_string())
+            .map_err(|_| "failed to send camera control command: connection closed".to_string())
+    }
+}
+
+impl Default for PipelineManager {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -325,14 +338,12 @@ async fn stream_connection(
     connection: &mut TransportConnection,
     shutdown_rx: &mut watch::Receiver<bool>,
 ) -> Result<StreamExit, String> {
-    let device = open_output_device()?;
+    let mut device = OutputDevice::open()?;
     let mut decoder = catch_unwind(AssertUnwindSafe(H264Decoder::new))
         .map_err(|_| "decoder initialization panicked".to_string())?
         .map_err(|err| format!("decoder initialization failed: {err:?}"))?;
 
-    let mut converter: Option<Nv12ToYuyvConverter> = None;
-    let mut converter_width = 0u32;
-    let mut converter_height = 0u32;
+    let mut keyframe_request_in_flight = false;
     let mut state_rx = connection.subscribe_state();
 
     loop {
@@ -353,14 +364,24 @@ async fn stream_connection(
 
                 match message {
                     Message::VideoFrame(video_frame) => {
-                        process_video_frame(
-                            &device,
+                        if video_frame.is_keyframe {
+                            keyframe_request_in_flight = false;
+                        }
+
+                        let request_keyframe = process_video_frame(
+                            &mut device,
                             &mut decoder,
-                            &mut converter,
-                            &mut converter_width,
-                            &mut converter_height,
                             video_frame,
                         )?;
+
+                        if request_keyframe && !keyframe_request_in_flight {
+                            connection
+                                .sender()
+                                .send(Message::CameraControl(CameraControl::RequestKeyframe))
+                                .await
+                                .map_err(|_| "failed to request a recovery keyframe".to_string())?;
+                            keyframe_request_in_flight = true;
+                        }
                     }
                     Message::Disconnect(_) => {
                         return Ok(StreamExit::PeerDisconnected);
@@ -373,18 +394,16 @@ async fn stream_connection(
 }
 
 fn process_video_frame(
-    device: &V4l2Device,
+    device: &mut OutputDevice,
     decoder: &mut H264Decoder,
-    converter: &mut Option<Nv12ToYuyvConverter>,
-    converter_width: &mut u32,
-    converter_height: &mut u32,
     video_frame: VideoFrame,
-) -> Result<(), String> {
+) -> Result<bool, String> {
+    let timestamp_ns = video_frame.pts_us.saturating_mul(1_000);
     let decode_output = match catch_unwind(AssertUnwindSafe(|| decoder.decode(&video_frame))) {
         Ok(Ok(output)) => output,
         Ok(Err(err)) => {
             log::warn!("failed to decode H.264 frame: {err:?}");
-            return Ok(());
+            return Ok(false);
         }
         Err(_) => {
             return Err("decoder panicked while processing frame".to_string());
@@ -392,82 +411,13 @@ fn process_video_frame(
     };
 
     for nv12_frame in decode_output.frames {
-        if converter.is_none()
-            || *converter_width != nv12_frame.width
-            || *converter_height != nv12_frame.height
-        {
-            device
-                .set_format(nv12_frame.width, nv12_frame.height, PixelFormat::YUYV)
-                .map_err(|err| {
-                    format!(
-                        "failed to configure v4l2 output format {}x{}: {err}",
-                        nv12_frame.width, nv12_frame.height
-                    )
-                })?;
-
-            let converter_result = catch_unwind(AssertUnwindSafe(|| {
-                Nv12ToYuyvConverter::new(nv12_frame.width, nv12_frame.height)
-            }))
-            .map_err(|_| "converter initialization panicked".to_string())?;
-
-            *converter = Some(
-                converter_result
-                    .map_err(|err| format!("converter initialization failed: {err:?}"))?,
-            );
-
-            *converter_width = nv12_frame.width;
-            *converter_height = nv12_frame.height;
-        }
-
-        let Some(converter_impl) = converter.as_mut() else {
-            return Err("converter missing after initialization".to_string());
-        };
-
-        let yuyv_frame =
-            match catch_unwind(AssertUnwindSafe(|| converter_impl.convert(&nv12_frame))) {
-                Ok(Ok(frame)) => frame,
-                Ok(Err(err)) => {
-                    log::warn!("failed to convert NV12 frame to YUYV: {err:?}");
-                    continue;
-                }
-                Err(_) => {
-                    return Err("converter panicked while processing frame".to_string());
-                }
-            };
-
-        device
-            .write_frame(&yuyv_frame.data)
-            .map_err(|err| format!("failed writing frame to {}: {err}", device.path().display()))?;
+        catch_unwind(AssertUnwindSafe(|| {
+            device.write_frame(&nv12_frame, timestamp_ns)
+        }))
+        .map_err(|_| "output driver panicked while processing frame".to_string())??;
     }
 
-    Ok(())
-}
-
-fn open_output_device() -> Result<V4l2Device, String> {
-    ensure_v4l2loopback_loaded().map_err(|err| format!("v4l2loopback is unavailable: {err}"))?;
-
-    let device_path = preferred_output_device_path().or_else(|| list_devices().into_iter().next());
-
-    let Some(device_path) = device_path else {
-        return Err("no V4L2 device found for output".to_string());
-    };
-
-    V4l2Device::open(&device_path).map_err(|err| {
-        format!(
-            "failed to open V4L2 device {}: {err}",
-            device_path.display()
-        )
-    })
-}
-
-fn preferred_output_device_path() -> Option<PathBuf> {
-    let value = std::env::var("PHONECAM_V4L2_DEVICE").ok()?;
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    Some(PathBuf::from(trimmed))
+    Ok(decode_output.request_keyframe)
 }
 
 #[cfg(test)]

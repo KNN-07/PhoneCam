@@ -21,16 +21,16 @@ if ! rustup target add x86_64-apple-ios >/dev/null 2>&1; then
 fi
 
 echo "[2/5] Building Rust static libraries"
-cargo build --manifest-path "$CRATE_MANIFEST" --release --target aarch64-apple-ios
-cargo build --manifest-path "$CRATE_MANIFEST" --release --target aarch64-apple-ios-sim
+cargo build --locked --manifest-path "$CRATE_MANIFEST" --release --target aarch64-apple-ios
+cargo build --locked --manifest-path "$CRATE_MANIFEST" --release --target aarch64-apple-ios-sim
 
 if [[ "$HAVE_X86_SIM" -eq 1 ]]; then
-  cargo build --manifest-path "$CRATE_MANIFEST" --release --target x86_64-apple-ios
+  cargo build --locked --manifest-path "$CRATE_MANIFEST" --release --target x86_64-apple-ios
 fi
 
 echo "[3/5] Generating UniFFI Swift bindings"
 if ! command -v uniffi-bindgen >/dev/null 2>&1; then
-  cargo install uniffi --locked --features cli
+  cargo install uniffi --version 0.31.2 --locked --features cli
 fi
 
 uniffi-bindgen generate --language swift "$UDL_FILE" --out-dir "$GENERATED_DIR"

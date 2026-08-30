@@ -16,6 +16,7 @@ enum class StreamResolution(
     val width: Int,
     val height: Int,
 ) {
+    SD_480P(width = 640, height = 480),
     HD_720P(width = 1280, height = 720),
     FULL_HD_1080P(width = 1920, height = 1080),
 }
@@ -41,12 +42,22 @@ class StreamManager(
     private val config: StreamConfig,
     private val onStatus: (String) -> Unit = {},
 ) {
-    private val encoder =
+    @Volatile
+    private var activeResolution = config.resolution
+    @Volatile
+    private var activeFps = config.fps
+    @Volatile
+    private var encoder = createEncoder(activeResolution, activeFps)
+
+    private fun createEncoder(
+        resolution: StreamResolution,
+        fps: Int,
+    ) =
         H264Encoder(
-            width = config.resolution.width,
-            height = config.resolution.height,
-            bitRate = config.bitRate,
-            frameRate = config.fps,
+            width = resolution.width,
+            height = resolution.height,
+            bitRate = bitrateFor(resolution),
+            frameRate = fps,
             onNalUnitReady = ::onNalUnit,
         )
 
@@ -87,7 +98,7 @@ class StreamManager(
             return
         }
 
-        RustBridge.setVideoResolution(config.resolution.width, config.resolution.height)
+        RustBridge.setVideoResolution(activeResolution.width, activeResolution.height)
         val connected = RustBridge.initializeTransport(config.endpointHost, config.endpointPort)
         if (!connected) {
             onStatus("Transport connection failed. Camera preview/encoding still active.")
@@ -154,7 +165,9 @@ class StreamManager(
         }
     }
 
-    fun targetResolution(): Size = config.targetSize
+    fun targetResolution(): Size = Size(activeResolution.width, activeResolution.height)
+
+    fun targetFps(): Int = activeFps
 
     private fun notifyCameraStateChanged(frontCamera: Boolean) {
         runCatching {
@@ -175,8 +188,13 @@ class StreamManager(
                             return@scheduleAtFixedRate
                         }
 
-                        val requestedFrontCamera = RustBridge.pollSwitchCameraCommand() ?: return@scheduleAtFixedRate
-                        handleRemoteCameraSwitch(requestedFrontCamera)
+                        when (val command = RustBridge.pollControlCommand() ?: return@scheduleAtFixedRate) {
+                            is RemoteControl.SwitchCamera -> handleRemoteCameraSwitch(command.front)
+                            RemoteControl.RequestKeyframe -> encoder.requestKeyFrame()
+                            is RemoteControl.ConfigureStream -> {
+                                handleRemoteStreamConfiguration(command.width, command.height, command.fps)
+                            }
+                        }
                     },
                     0,
                     CAMERA_CONTROL_POLL_INTERVAL_MS,
@@ -237,6 +255,7 @@ class StreamManager(
                     useFrontCamera = requestFrontCamera,
                     previewView = preview,
                     targetResolution = targetResolution(),
+                    targetFps = targetFps(),
                     onFrame = ::handleCameraFrame,
                 )
             }.onFailure {
@@ -279,6 +298,102 @@ class StreamManager(
         }
     }
 
+    private fun handleRemoteStreamConfiguration(
+        width: Int,
+        height: Int,
+        fps: Int,
+    ) {
+        val resolution = StreamResolution.entries.firstOrNull { it.width == width && it.height == height }
+        if (resolution == null || fps !in SUPPORTED_FRAME_RATES) {
+            onStatus("Desktop requested unsupported stream configuration ${width}x$height@$fps")
+            return
+        }
+
+        if (resolution == activeResolution && fps == activeFps) {
+            encoder.requestKeyFrame()
+            return
+        }
+
+        synchronized(cameraSwitchLock) {
+            if (switchInProgress) {
+                return
+            }
+            switchInProgress = true
+        }
+
+        try {
+            performRemoteStreamConfiguration(resolution, fps)
+        } finally {
+            synchronized(cameraSwitchLock) {
+                switchInProgress = false
+            }
+        }
+    }
+
+    private fun performRemoteStreamConfiguration(
+        resolution: StreamResolution,
+        fps: Int,
+    ) {
+        val controller = cameraController
+        val preview = previewView
+        if (controller == null || preview == null) {
+            onStatus("Stream configuration requested before camera pipeline initialization")
+            return
+        }
+
+        val previousResolution = activeResolution
+        val previousFps = activeFps
+        runCatching { encoder.stop() }
+
+        val configured =
+            runCatching {
+                activeResolution = resolution
+                activeFps = fps
+                controller.switchCamera(
+                    useFrontCamera = isFrontCamera,
+                    previewView = preview,
+                    targetResolution = targetResolution(),
+                    targetFps = targetFps(),
+                    onFrame = ::handleCameraFrame,
+                )
+                encoder = createEncoder(activeResolution, activeFps)
+                encoder.start()
+                encoder.requestKeyFrame()
+                RustBridge.setVideoResolution(activeResolution.width, activeResolution.height)
+            }.onFailure {
+                Log.e(TAG, "Failed to apply remote stream configuration", it)
+            }.isSuccess
+
+        if (configured) {
+            onStatus("Streaming ${resolution.width}x${resolution.height}@$fps")
+            return
+        }
+
+        activeResolution = previousResolution
+        activeFps = previousFps
+        runCatching {
+            controller.switchCamera(
+                useFrontCamera = isFrontCamera,
+                previewView = preview,
+                targetResolution = targetResolution(),
+                targetFps = targetFps(),
+                onFrame = ::handleCameraFrame,
+            )
+            encoder = createEncoder(activeResolution, activeFps)
+            encoder.start()
+            encoder.requestKeyFrame()
+            RustBridge.setVideoResolution(activeResolution.width, activeResolution.height)
+        }
+        onStatus("Unable to apply stream configuration; restored previous settings")
+    }
+
+    private fun bitrateFor(resolution: StreamResolution): Int =
+        when (resolution) {
+            StreamResolution.SD_480P -> minOf(config.bitRate, 2_500_000)
+            StreamResolution.HD_720P -> config.bitRate
+            StreamResolution.FULL_HD_1080P -> maxOf(config.bitRate, 5_000_000)
+        }
+
     private fun onNalUnit(
         nalUnit: ByteArray,
         ptsUs: Long,
@@ -303,7 +418,9 @@ class StreamManager(
 
         fun phonecam_parse_qr_code_uri(uri: String): Pointer?
 
-        fun phonecam_poll_switch_camera_command(): Byte
+        fun phonecam_poll_control_command(): Long
+
+        fun phonecam_discover_desktops(timeoutMs: Int): Pointer?
 
         fun phonecam_string_free(ptr: Pointer?)
     }
@@ -378,17 +495,53 @@ class StreamManager(
             }
         }
 
-        fun pollSwitchCameraCommand(): Boolean? {
-            val commandCode =
+        fun discoverDesktops(timeoutMs: Int = 3_000): List<QrConnectionInfo> {
+            val ptr =
                 runCatching {
-                    lib.phonecam_poll_switch_camera_command().toInt()
+                    lib.phonecam_discover_desktops(timeoutMs.coerceIn(100, 5_000))
+                }.onFailure {
+                    Log.w(TAG, "Rust mDNS discovery failed", it)
+                }.getOrNull() ?: return emptyList()
+
+            return try {
+                ptr.getString(0)
+                    .lineSequence()
+                    .filter { it.isNotBlank() }
+                    .mapNotNull { record ->
+                        val parts = record.split('|', limit = 4)
+                        if (parts.size != 4) {
+                            return@mapNotNull null
+                        }
+                        val port = parts[2].toIntOrNull()?.coerceIn(1, 65535) ?: return@mapNotNull null
+                        QrConnectionInfo(
+                            host = parts[1],
+                            port = port,
+                            deviceName = parts[0].ifBlank { "PhoneCam Desktop" },
+                        )
+                    }.toList()
+            } finally {
+                runCatching { lib.phonecam_string_free(ptr) }
+            }
+        }
+
+        fun pollControlCommand(): RemoteControl? {
+            val packed =
+                runCatching {
+                    lib.phonecam_poll_control_command()
                 }.onFailure {
                     Log.w(TAG, "Rust camera control poll failed", it)
-                }.getOrDefault(CAMERA_SWITCH_NONE)
+                }.getOrDefault(CONTROL_NONE)
 
-            return when (commandCode) {
-                CAMERA_SWITCH_FRONT -> true
-                CAMERA_SWITCH_BACK -> false
+            return when ((packed and 0xffL).toInt()) {
+                CONTROL_SWITCH_FRONT -> RemoteControl.SwitchCamera(front = true)
+                CONTROL_SWITCH_BACK -> RemoteControl.SwitchCamera(front = false)
+                CONTROL_REQUEST_KEYFRAME -> RemoteControl.RequestKeyframe
+                CONTROL_CONFIGURE_STREAM ->
+                    RemoteControl.ConfigureStream(
+                        width = ((packed ushr 8) and 0xffffL).toInt(),
+                        height = ((packed ushr 24) and 0xffffL).toInt(),
+                        fps = ((packed ushr 40) and 0xffL).toInt(),
+                    )
                 else -> null
             }
         }
@@ -429,10 +582,29 @@ class StreamManager(
     companion object {
         private const val TAG = "StreamManager"
         private const val CAMERA_CONTROL_POLL_INTERVAL_MS = 150L
-        private const val CAMERA_SWITCH_NONE = 0
-        private const val CAMERA_SWITCH_BACK = 1
-        private const val CAMERA_SWITCH_FRONT = 2
+        private const val CONTROL_NONE = 0L
+        private const val CONTROL_SWITCH_BACK = 1
+        private const val CONTROL_SWITCH_FRONT = 2
+        private const val CONTROL_REQUEST_KEYFRAME = 3
+        private const val CONTROL_CONFIGURE_STREAM = 4
+        private val SUPPORTED_FRAME_RATES = setOf(15, 30, 60)
 
         fun parseQrConnectionUri(uri: String): QrConnectionInfo? = RustBridge.parseQrConnectionUri(uri)
+
+        fun discoverDesktops(): List<QrConnectionInfo> = RustBridge.discoverDesktops()
     }
+}
+
+private sealed class RemoteControl {
+    data class SwitchCamera(
+        val front: Boolean,
+    ) : RemoteControl()
+
+    data object RequestKeyframe : RemoteControl()
+
+    data class ConfigureStream(
+        val width: Int,
+        val height: Int,
+        val fps: Int,
+    ) : RemoteControl()
 }

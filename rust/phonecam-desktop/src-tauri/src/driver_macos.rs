@@ -15,12 +15,12 @@ const SOCKET_FILE_NAME: &str = "phonecam.sock";
 const FRAME_HEADER_SIZE: usize = 16;
 
 #[cfg(target_os = "macos")]
-pub struct MacOSDriver {
+pub struct MacOsDriver {
     stream: Option<UnixStream>,
 }
 
 #[cfg(target_os = "macos")]
-impl MacOSDriver {
+impl MacOsDriver {
     pub fn new() -> Self {
         Self { stream: None }
     }
@@ -144,8 +144,7 @@ fn app_group_container_path(app_group_identifier: &str) -> io::Result<PathBuf> {
         )
     };
     if app_group_ns_string.is_null() {
-        return Err(io::Error::new(
-            ErrorKind::Other,
+        return Err(io::Error::other(
             "failed to allocate NSString for app group identifier",
         ));
     }
@@ -153,8 +152,7 @@ fn app_group_container_path(app_group_identifier: &str) -> io::Result<PathBuf> {
     let default_manager_selector = get_selector(b"defaultManager\0")?;
     let file_manager = unsafe { objc_msg_send_id(ns_file_manager_class, default_manager_selector) };
     if file_manager.is_null() {
-        return Err(io::Error::new(
-            ErrorKind::Other,
+        return Err(io::Error::other(
             "NSFileManager.defaultManager returned nil",
         ));
     }
@@ -176,19 +174,13 @@ fn app_group_container_path(app_group_identifier: &str) -> io::Result<PathBuf> {
     let path_selector = get_selector(b"path\0")?;
     let path_ns_string = unsafe { objc_msg_send_id(container_url, path_selector) };
     if path_ns_string.is_null() {
-        return Err(io::Error::new(
-            ErrorKind::Other,
-            "container URL path is nil",
-        ));
+        return Err(io::Error::other("container URL path is nil"));
     }
 
     let utf8_string_selector = get_selector(b"UTF8String\0")?;
     let utf8_path_pointer = unsafe { objc_msg_send_cstr(path_ns_string, utf8_string_selector) };
     if utf8_path_pointer.is_null() {
-        return Err(io::Error::new(
-            ErrorKind::Other,
-            "container URL path UTF8String is nil",
-        ));
+        return Err(io::Error::other("container URL path UTF8String is nil"));
     }
 
     let path = unsafe { CStr::from_ptr(utf8_path_pointer) }
@@ -208,13 +200,10 @@ fn app_group_container_path(app_group_identifier: &str) -> io::Result<PathBuf> {
 fn get_objc_class(class_name: &'static [u8]) -> io::Result<*mut c_void> {
     let class = unsafe { objc_getClass(class_name.as_ptr().cast()) };
     if class.is_null() {
-        return Err(io::Error::new(
-            ErrorKind::Other,
-            format!(
-                "Objective-C class '{}' not found",
-                String::from_utf8_lossy(&class_name[..class_name.len().saturating_sub(1)])
-            ),
-        ));
+        return Err(io::Error::other(format!(
+            "Objective-C class '{}' not found",
+            String::from_utf8_lossy(&class_name[..class_name.len().saturating_sub(1)])
+        )));
     }
 
     Ok(class)
@@ -224,13 +213,10 @@ fn get_objc_class(class_name: &'static [u8]) -> io::Result<*mut c_void> {
 fn get_selector(selector_name: &'static [u8]) -> io::Result<*mut c_void> {
     let selector = unsafe { sel_registerName(selector_name.as_ptr().cast()) };
     if selector.is_null() {
-        return Err(io::Error::new(
-            ErrorKind::Other,
-            format!(
-                "Objective-C selector '{}' not found",
-                String::from_utf8_lossy(&selector_name[..selector_name.len().saturating_sub(1)])
-            ),
-        ));
+        return Err(io::Error::other(format!(
+            "Objective-C selector '{}' not found",
+            String::from_utf8_lossy(&selector_name[..selector_name.len().saturating_sub(1)])
+        )));
     }
 
     Ok(selector)
@@ -252,6 +238,13 @@ impl Drop for AutoreleasePool {
         unsafe {
             objc_autoreleasePoolPop(self.0);
         }
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Default for MacOsDriver {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

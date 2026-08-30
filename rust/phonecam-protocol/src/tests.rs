@@ -81,12 +81,20 @@ fn video_frame_roundtrip_with_empty_nal_unit() {
 
 #[test]
 fn camera_control_roundtrip() {
-    let message = Message::CameraControl(CameraControl::SwitchCamera { front: true });
-
-    let encoded = encode_frame(&message).expect("camera control should encode");
-    let decoded = decode_frame(&encoded).expect("camera control should decode");
-
-    assert_eq!(message, decoded);
+    for control in [
+        CameraControl::SwitchCamera { front: true },
+        CameraControl::RequestKeyframe,
+        CameraControl::ConfigureStream {
+            width: 1920,
+            height: 1080,
+            fps: 60,
+        },
+    ] {
+        let message = Message::CameraControl(control);
+        let encoded = encode_frame(&message).expect("camera control should encode");
+        let decoded = decode_frame(&encoded).expect("camera control should decode");
+        assert_eq!(message, decoded);
+    }
 }
 
 #[test]
@@ -243,7 +251,12 @@ fn audio_frame_strategy() -> impl Strategy<Value = AudioFrame> {
 }
 
 fn camera_control_strategy() -> impl Strategy<Value = CameraControl> {
-    any::<bool>().prop_map(|front| CameraControl::SwitchCamera { front })
+    prop_oneof![
+        any::<bool>().prop_map(|front| CameraControl::SwitchCamera { front }),
+        Just(CameraControl::RequestKeyframe),
+        (1u16..=u16::MAX, 1u16..=u16::MAX, 1u8..=120u8)
+            .prop_map(|(width, height, fps)| CameraControl::ConfigureStream { width, height, fps }),
+    ]
 }
 
 fn status_update_strategy() -> impl Strategy<Value = StatusUpdate> {

@@ -102,6 +102,13 @@ impl WindowsDriver {
 }
 
 #[cfg(target_os = "windows")]
+impl Default for WindowsDriver {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(target_os = "windows")]
 fn expected_nv12_payload_len(width: u32, height: u32) -> io::Result<usize> {
     if width == 0 || height == 0 {
         return Err(io::Error::new(
@@ -250,6 +257,10 @@ fn write_all_to_pipe(pipe: &PipeHandle, mut bytes: &[u8]) -> io::Result<()> {
 struct PipeHandle {
     handle: Handle,
 }
+
+// Windows HANDLE values are valid across threads within the owning process.
+#[cfg(target_os = "windows")]
+unsafe impl Send for PipeHandle {}
 
 #[cfg(target_os = "windows")]
 impl Drop for PipeHandle {

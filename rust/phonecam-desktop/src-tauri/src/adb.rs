@@ -210,17 +210,17 @@ impl AdbManager {
         Ok(devices)
     }
 
-    pub async fn forward(
+    pub async fn reverse(
         &self,
-        local_port: u16,
-        remote_port: u16,
+        device_port: u16,
+        host_port: u16,
         serial: Option<&str>,
     ) -> Result<String, AdbError> {
-        if local_port == 0 {
-            return Err(AdbError::InvalidPort(local_port));
+        if device_port == 0 {
+            return Err(AdbError::InvalidPort(device_port));
         }
-        if remote_port == 0 {
-            return Err(AdbError::InvalidPort(remote_port));
+        if host_port == 0 {
+            return Err(AdbError::InvalidPort(host_port));
         }
 
         self.ensure_server_started().await?;
@@ -229,22 +229,22 @@ impl AdbManager {
         let args = vec![
             "-s".to_string(),
             target_serial.clone(),
-            "forward".to_string(),
-            format!("tcp:{local_port}"),
-            format!("tcp:{remote_port}"),
+            "reverse".to_string(),
+            format!("tcp:{device_port}"),
+            format!("tcp:{host_port}"),
         ];
 
         let _ = self.run_success(args).await?;
         Ok(target_serial)
     }
 
-    pub async fn kill_forward(
+    pub async fn kill_reverse(
         &self,
-        local_port: u16,
+        device_port: u16,
         serial: Option<&str>,
     ) -> Result<String, AdbError> {
-        if local_port == 0 {
-            return Err(AdbError::InvalidPort(local_port));
+        if device_port == 0 {
+            return Err(AdbError::InvalidPort(device_port));
         }
 
         self.ensure_server_started().await?;
@@ -257,9 +257,9 @@ impl AdbManager {
         let args = vec![
             "-s".to_string(),
             target_serial.clone(),
-            "forward".to_string(),
+            "reverse".to_string(),
             "--remove".to_string(),
-            format!("tcp:{local_port}"),
+            format!("tcp:{device_port}"),
         ];
 
         let _ = self.run_success(args).await?;
@@ -315,7 +315,11 @@ impl AdbManager {
                                 return;
                             }
                         }
-                        Some(previous_device) if previous_device.state != device.state => {
+                        Some(previous_device) => {
+                            if previous_device.state == device.state {
+                                continue;
+                            }
+
                             if tx
                                 .send(AdbDeviceEvent {
                                     serial: serial.clone(),
@@ -330,7 +334,6 @@ impl AdbManager {
                                 return;
                             }
                         }
-                        _ => {}
                     }
                 }
 
@@ -679,7 +682,7 @@ mod tests {
         let output = r#"
 List of devices attached
 ABC123DEF456    device product:model device:device transport_id:1
-XYZ789ABC012\tdevice product:model2 device:device2 transport_id:2
+XYZ789ABC012	device product:model2 device:device2 transport_id:2
 "#;
 
         let devices = parse_devices_output(output);

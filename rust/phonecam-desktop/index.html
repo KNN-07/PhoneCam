@@ -41,11 +41,10 @@
         </section>
 
         <section class="discovery-section">
-          <h2>Discovered Devices</h2>
-          <div class="device-list-container">
-            <ul id="device-list" class="device-list">
-              <li class="device-item empty-state">Scanning for devices...</li>
-            </ul>
+          <h2>Connect Your Phone</h2>
+          <div class="device-list-container connection-help">
+            <p>Keep this receiver listening, then choose this desktop in the PhoneCam mobile app.</p>
+            <p>Use the QR code when local-network discovery is unavailable.</p>
           </div>
         </section>
 
@@ -70,14 +69,15 @@
         </section>
 
         <section class="manual-connect-section">
-          <h2>Manual Connection</h2>
+          <h2>Receiver Controls</h2>
           <div class="input-group">
-            <input type="text" id="ip-input" placeholder="Device IP Address" class="input-field" />
+            <input type="text" id="ip-input" placeholder="Optional Android USB serial" class="input-field" />
             <input type="number" id="port-input" value="7878" placeholder="Port" class="input-field port-field" />
           </div>
           <div class="action-group">
-            <button id="connect-btn" class="btn primary-btn">Connect</button>
-            <button id="disconnect-btn" class="btn secondary-btn" disabled>Disconnect</button>
+            <button id="connect-btn" class="btn primary-btn">Start Wi-Fi Receiver</button>
+            <button id="usb-connect-btn" class="btn primary-btn">Enable Android USB</button>
+            <button id="disconnect-btn" class="btn secondary-btn" disabled>Stop Receiver</button>
           </div>
         </section>
 

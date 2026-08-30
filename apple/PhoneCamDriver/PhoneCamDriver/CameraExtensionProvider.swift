@@ -135,18 +135,10 @@ final class PhoneCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
             source: self
         )
 
-        let formatDescription = Self.createDefaultFormatDescription()
-        let streamFormat = CMIOExtensionStreamFormat(
-            formatDescription: formatDescription,
-            maxFrameDuration: CMTime(value: 1, timescale: 15),
-            minFrameDuration: CMTime(value: 1, timescale: 60),
-            validFrameDurations: nil
-        )
-
         streamSource = PhoneCamStreamSource(
             localizedName: "PhoneCam Video",
             streamID: configuration.streamID,
-            streamFormat: streamFormat,
+            streamFormats: Self.createStreamFormats(),
             device: device
         )
 
@@ -294,24 +286,35 @@ final class PhoneCamDeviceSource: NSObject, CMIOExtensionDeviceSource {
         return UInt64(max(0, now.seconds * 1_000_000_000))
     }
 
-    private static func createDefaultFormatDescription() -> CMFormatDescription {
-        let dimensions = CMVideoDimensions(width: 1280, height: 720)
-        var formatDescription: CMFormatDescription?
+    private static func createStreamFormats() -> [CMIOExtensionStreamFormat] {
+        let dimensions = [
+            CMVideoDimensions(width: 640, height: 480),
+            CMVideoDimensions(width: 1280, height: 720),
+            CMVideoDimensions(width: 1920, height: 1080),
+        ]
 
-        let status = CMVideoFormatDescriptionCreate(
-            allocator: kCFAllocatorDefault,
-            codecType: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
-            width: dimensions.width,
-            height: dimensions.height,
-            extensions: nil,
-            formatDescriptionOut: &formatDescription
-        )
+        return dimensions.map { dimensions in
+            var formatDescription: CMFormatDescription?
+            let status = CMVideoFormatDescriptionCreate(
+                allocator: kCFAllocatorDefault,
+                codecType: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
+                width: dimensions.width,
+                height: dimensions.height,
+                extensions: nil,
+                formatDescriptionOut: &formatDescription
+            )
 
-        guard status == noErr, let formatDescription else {
-            fatalError("Failed to create default stream format description")
+            guard status == noErr, let formatDescription else {
+                fatalError("Failed to create (dimensions.width)x(dimensions.height) stream format")
+            }
+
+            return CMIOExtensionStreamFormat(
+                formatDescription: formatDescription,
+                maxFrameDuration: CMTime(value: 1, timescale: 15),
+                minFrameDuration: CMTime(value: 1, timescale: 60),
+                validFrameDurations: nil
+            )
         }
-
-        return formatDescription
     }
 }
 

@@ -123,6 +123,19 @@ h2 {
   min-height: 150px;
 }
 
+.connection-help {
+  min-height: 0;
+}
+
+.connection-help p {
+  margin: 0;
+}
+
+.connection-help p + p {
+  margin-top: 8px;
+  opacity: 0.72;
+}
+
 .device-list {
   list-style: none;
   padding: 0;

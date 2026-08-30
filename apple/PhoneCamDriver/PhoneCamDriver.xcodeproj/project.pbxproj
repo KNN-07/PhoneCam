@@ -19,7 +19,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		5A1000000000000000000001 /* PhoneCamDriver.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = PhoneCamDriver.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		5A1000000000000000000001 /* PhoneCamDriver.systemextension */ = {isa = PBXFileReference; explicitFileType = "wrapper.system-extension"; includeInIndex = 0; path = PhoneCamDriver.systemextension; sourceTree = BUILT_PRODUCTS_DIR; };
 		5A1001010000000000000001 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
 		5A1001010000000000000002 /* CameraExtensionProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraExtensionProvider.swift; sourceTree = "<group>"; };
 		5A1001010000000000000003 /* StreamSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamSource.swift; sourceTree = "<group>"; };
@@ -61,7 +61,7 @@
 		5A1004000000000000000002 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				5A1000000000000000000001 /* PhoneCamDriver.appex */,
+				5A1000000000000000000001 /* PhoneCamDriver.systemextension */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -109,8 +109,8 @@
 			);
 			name = PhoneCamDriver;
 			productName = PhoneCamDriver;
-			productReference = 5A1000000000000000000001 /* PhoneCamDriver.appex */;
-			productType = "com.apple.product-type.app-extension";
+			productReference = 5A1000000000000000000001 /* PhoneCamDriver.systemextension */;
+			productType = "com.apple.product-type.system-extension";
 		};
 /* End PBXNativeTarget section */
 

@@ -2,6 +2,7 @@ const { invoke } = window.__TAURI__.core;
 
 let currentStatus = { connected: false, state: "Disconnected" };
 let currentCameraFront = false;
+let lastAppliedStreamSettings = null;
 
 const DEFAULT_SETTINGS = {
   resolution: "1280x720",
@@ -35,6 +36,37 @@ function saveSettings() {
     console.log("Settings saved:", settings);
   } catch (e) {
     console.error("Failed to save settings:", e);
+  }
+}
+
+function readStreamSettings() {
+  const [width, height] = document
+    .getElementById("resolution-select")
+    .value
+    .split("x")
+    .map(Number);
+  const fps = Number(document.getElementById("fps-select").value);
+  return { width, height, fps };
+}
+
+async function applyStreamSettings() {
+  if (!currentStatus.connected) return;
+
+  const settings = readStreamSettings();
+  const settingsKey = `${settings.width}x${settings.height}@${settings.fps}`;
+  if (settingsKey === lastAppliedStreamSettings) return;
+
+  await invoke("configure_stream", settings);
+  lastAppliedStreamSettings = settingsKey;
+}
+
+async function handleSettingsChange() {
+  saveSettings();
+  lastAppliedStreamSettings = null;
+  try {
+    await applyStreamSettings();
+  } catch (e) {
+    alert("Unable to update stream settings: " + e);
   }
 }
 
@@ -81,6 +113,7 @@ async function updateStatus() {
 
       connectBtn.disabled = true;
       disconnectBtn.disabled = false;
+      await applyStreamSettings();
     } else {
       statusEl.classList.remove("connected");
       statusEl.classList.add("disconnected");
@@ -94,6 +127,7 @@ async function updateStatus() {
       fpsEl.style.display = "none";
       connectBtn.disabled = false;
       disconnectBtn.disabled = true;
+      lastAppliedStreamSettings = null;
     }
 
     updateCameraControlUi();
@@ -102,56 +136,8 @@ async function updateStatus() {
   }
 }
 
-async function updateDevices() {
-  try {
-    const devices = await invoke("get_discovered_devices");
-    const listEl = document.getElementById("device-list");
-    
-    if (!devices || devices.length === 0) {
-      listEl.innerHTML = '<li class="device-item empty-state">Scanning for devices...</li>';
-      return;
-    }
-
-    listEl.innerHTML = "";
-    devices.forEach(device => {
-      const li = document.createElement("li");
-      li.className = "device-item";
-      
-      const infoDiv = document.createElement("div");
-      infoDiv.textContent = `${device.name || 'Unknown'} (${device.ip}:${device.port})`;
-      
-      const connectBtn = document.createElement("button");
-      connectBtn.className = "btn primary-btn";
-      connectBtn.textContent = "Connect";
-      connectBtn.style.padding = "5px 10px";
-      connectBtn.style.fontSize = "0.8rem";
-      connectBtn.onclick = (e) => {
-        e.stopPropagation();
-        connect(device.ip, device.port);
-      };
-      
-      li.onclick = () => {
-        document.getElementById("ip-input").value = device.ip;
-        document.getElementById("port-input").value = device.port;
-      };
-      
-      li.appendChild(infoDiv);
-      li.appendChild(connectBtn);
-      listEl.appendChild(li);
-    });
-  } catch (e) {
-    console.error("Failed to get devices:", e);
-  }
-}
-
-async function connect(ipArg, portArg) {
-  let ip = ipArg;
-  let port = portArg;
-  
-  if (!ip || !port) {
-    ip = document.getElementById("ip-input").value;
-    port = parseInt(document.getElementById("port-input").value);
-  }
+async function connect(ip, portArg) {
+  const port = portArg || parseInt(document.getElementById("port-input").value);
   
   if (!ip || !port) {
     alert("Please enter IP and Port");
@@ -168,6 +154,15 @@ async function connect(ipArg, portArg) {
   } catch (e) {
     alert("Connection failed: " + e);
   }
+}
+
+function startWifiReceiver() {
+  return connect("wifi");
+}
+
+function startUsbReceiver() {
+  const serial = document.getElementById("ip-input").value.trim();
+  return connect(serial ? `usb:${serial}` : "usb");
 }
 
 async function disconnect() {
@@ -250,6 +245,7 @@ window.addEventListener("DOMContentLoaded", () => {
   loadSettings();
 
   const connectBtn = document.getElementById("connect-btn");
+  const usbConnectBtn = document.getElementById("usb-connect-btn");
   const disconnectBtn = document.getElementById("disconnect-btn");
   const showQrBtn = document.getElementById("show-qr-btn");
   const hideQrBtn = document.getElementById("hide-qr-btn");
@@ -257,19 +253,18 @@ window.addEventListener("DOMContentLoaded", () => {
   const resolutionSelect = document.getElementById("resolution-select");
   const fpsSelect = document.getElementById("fps-select");
   
-  if (connectBtn) connectBtn.addEventListener("click", () => connect());
+  if (connectBtn) connectBtn.addEventListener("click", startWifiReceiver);
+  if (usbConnectBtn) usbConnectBtn.addEventListener("click", startUsbReceiver);
   if (disconnectBtn) disconnectBtn.addEventListener("click", disconnect);
   if (showQrBtn) showQrBtn.addEventListener("click", showQrCode);
   if (hideQrBtn) hideQrBtn.addEventListener("click", hideQrCode);
   if (switchCameraBtn) switchCameraBtn.addEventListener("click", switchCamera);
   
-  if (resolutionSelect) resolutionSelect.addEventListener("change", saveSettings);
-  if (fpsSelect) fpsSelect.addEventListener("change", saveSettings);
+  if (resolutionSelect) resolutionSelect.addEventListener("change", handleSettingsChange);
+  if (fpsSelect) fpsSelect.addEventListener("change", handleSettingsChange);
   
   setInterval(updateStatus, 1000);
-  setInterval(updateDevices, 3000);
   
   updateCameraControlUi();
   updateStatus();
-  updateDevices();
 });

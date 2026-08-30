@@ -58,6 +58,49 @@ struct ContentView: View {
                     }
                     .pickerStyle(.segmented)
 
+                    Picker(
+                        "Frame rate",
+                        selection: Binding(
+                            get: { streamManager.selectedFps },
+                            set: { streamManager.setFrameRate($0) }
+                        )
+                    ) {
+                        Text("15 FPS").tag(Int32(15))
+                        Text("30 FPS").tag(Int32(30))
+                        Text("60 FPS").tag(Int32(60))
+                    }
+                    .pickerStyle(.segmented)
+
+                    Button {
+                        streamManager.discoverDesktops()
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "wifi")
+                            Text(streamManager.isDiscovering ? "Discovering…" : "Discover Desktops")
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundColor(.white)
+                        .padding(.vertical, 10)
+                        .frame(maxWidth: .infinity)
+                        .background(Color.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                    .disabled(streamManager.isDiscovering)
+
+                    ForEach(streamManager.discoveredDesktops) { desktop in
+                        Button {
+                            streamManager.connect(to: desktop)
+                        } label: {
+                            HStack {
+                                Text(desktop.name)
+                                Spacer()
+                                Text("\(desktop.host):\(desktop.port)")
+                                    .font(.caption)
+                                    .foregroundColor(.white.opacity(0.7))
+                            }
+                            .foregroundColor(.white)
+                        }
+                    }
+
                     Button {
                         isShowingQrScanner = true
                     } label: {

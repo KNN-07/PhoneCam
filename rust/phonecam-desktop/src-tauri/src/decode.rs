@@ -1,5 +1,6 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use openh264::{decoder::Decoder, formats::YUVSource};
 use phonecam_protocol::VideoFrame;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,53 +27,241 @@ pub enum DecodeError {
     DecodeFailed(String),
 }
 
-pub struct H264Decoder;
+pub struct H264Decoder {
+    decoder: Decoder,
+    waiting_for_keyframe: bool,
+}
 
 impl H264Decoder {
     pub fn new() -> Result<Self, DecodeError> {
-        todo!("implemented in green phase")
+        let decoder = Decoder::new().map_err(|err| DecodeError::DecodeFailed(err.to_string()))?;
+
+        Ok(Self {
+            decoder,
+            waiting_for_keyframe: false,
+        })
     }
 
-    pub fn decode(&mut self, _video_frame: &VideoFrame) -> Result<DecodeOutput, DecodeError> {
-        todo!("implemented in green phase")
+    pub fn decode(&mut self, video_frame: &VideoFrame) -> Result<DecodeOutput, DecodeError> {
+        let started = Instant::now();
+
+        if self.waiting_for_keyframe && !video_frame.is_keyframe {
+            return Ok(DecodeOutput {
+                frames: Vec::new(),
+                request_keyframe: true,
+                decode_time: started.elapsed(),
+            });
+        }
+
+        let payload = match normalize_annex_b(&video_frame.nal_unit) {
+            Ok(payload) => payload,
+            Err(()) => {
+                self.waiting_for_keyframe = true;
+                return Ok(DecodeOutput {
+                    frames: Vec::new(),
+                    request_keyframe: true,
+                    decode_time: started.elapsed(),
+                });
+            }
+        };
+
+        self.waiting_for_keyframe = false;
+        let frames = match self.decoder.decode(&payload) {
+            Ok(Some(decoded)) => vec![decoded_frame_to_nv12(&decoded, video_frame.pts_us)?],
+            Ok(None) => Vec::new(),
+            Err(_) => {
+                self.waiting_for_keyframe = true;
+                Vec::new()
+            }
+        };
+
+        Ok(DecodeOutput {
+            frames,
+            request_keyframe: self.waiting_for_keyframe,
+            decode_time: started.elapsed(),
+        })
     }
+}
+
+fn decoded_frame_to_nv12(
+    decoded: &impl YUVSource,
+    fallback_pts_us: u64,
+) -> Result<Nv12Frame, DecodeError> {
+    let (width, height) = decoded.dimensions();
+    if width == 0 || height == 0 || width % 2 != 0 || height % 2 != 0 {
+        return Err(DecodeError::DecodeFailed(format!(
+            "decoder produced invalid dimensions {width}x{height}"
+        )));
+    }
+
+    let (y_stride, u_stride, v_stride) = decoded.strides();
+    let y_plane = copy_plane_rows(decoded.y(), y_stride, width, height)?;
+    let chroma_width = width / 2;
+    let chroma_height = height / 2;
+    let u_plane = copy_plane_rows(decoded.u(), u_stride, chroma_width, chroma_height)?;
+    let v_plane = copy_plane_rows(decoded.v(), v_stride, chroma_width, chroma_height)?;
+    let mut uv_plane = Vec::with_capacity(width * chroma_height);
+    for (&u, &v) in u_plane.iter().zip(v_plane.iter()) {
+        uv_plane.push(u);
+        uv_plane.push(v);
+    }
+
+    Ok(Nv12Frame {
+        width: width as u32,
+        height: height as u32,
+        pts_us: fallback_pts_us,
+        y_stride: width,
+        uv_stride: width,
+        y_plane,
+        uv_plane,
+    })
+}
+
+fn copy_plane_rows(
+    source: &[u8],
+    source_stride: usize,
+    row_width: usize,
+    row_count: usize,
+) -> Result<Vec<u8>, DecodeError> {
+    if source_stride < row_width {
+        return Err(DecodeError::DecodeFailed(
+            "decoded plane stride is smaller than its visible width".to_string(),
+        ));
+    }
+
+    let required = source_stride
+        .checked_mul(row_count)
+        .ok_or_else(|| DecodeError::DecodeFailed("decoded plane size overflow".to_string()))?;
+    if source.len() < required {
+        return Err(DecodeError::DecodeFailed(
+            "decoded plane is shorter than its stride layout".to_string(),
+        ));
+    }
+
+    let output_len = row_width
+        .checked_mul(row_count)
+        .ok_or_else(|| DecodeError::DecodeFailed("decoded output size overflow".to_string()))?;
+    let mut output = Vec::with_capacity(output_len);
+    for row in 0..row_count {
+        let start = row * source_stride;
+        output.extend_from_slice(&source[start..start + row_width]);
+    }
+    Ok(output)
+}
+
+fn normalize_annex_b(data: &[u8]) -> Result<Vec<u8>, ()> {
+    if data.is_empty() {
+        return Err(());
+    }
+
+    if has_annex_b_start_code(data) {
+        return validate_annex_b(data).then(|| data.to_vec()).ok_or(());
+    }
+
+    if let Ok(converted) = convert_avcc_to_annex_b(data) {
+        return Ok(converted);
+    }
+
+    if valid_nal_header(data[0]) {
+        let mut converted = Vec::with_capacity(data.len() + 4);
+        converted.extend_from_slice(&[0, 0, 0, 1]);
+        converted.extend_from_slice(data);
+        return Ok(converted);
+    }
+
+    Err(())
+}
+
+fn has_annex_b_start_code(data: &[u8]) -> bool {
+    data.starts_with(&[0, 0, 1]) || data.starts_with(&[0, 0, 0, 1])
+}
+
+fn validate_annex_b(data: &[u8]) -> bool {
+    let mut cursor = 0;
+    let mut found = false;
+
+    while cursor + 3 <= data.len() {
+        let start_code_len = if data[cursor..].starts_with(&[0, 0, 0, 1]) {
+            4
+        } else if data[cursor..].starts_with(&[0, 0, 1]) {
+            3
+        } else {
+            cursor += 1;
+            continue;
+        };
+
+        let header_index = cursor + start_code_len;
+        if header_index >= data.len() || !valid_nal_header(data[header_index]) {
+            return false;
+        }
+        found = true;
+        cursor = header_index + 1;
+    }
+
+    found
+}
+
+fn convert_avcc_to_annex_b(data: &[u8]) -> Result<Vec<u8>, ()> {
+    let mut cursor = 0usize;
+    let mut converted = Vec::with_capacity(data.len() + 4);
+
+    while cursor < data.len() {
+        if data.len() - cursor < 4 {
+            return Err(());
+        }
+        let nal_len =
+            u32::from_be_bytes(data[cursor..cursor + 4].try_into().map_err(|_| ())?) as usize;
+        cursor += 4;
+
+        if nal_len == 0 || nal_len > data.len() - cursor || !valid_nal_header(data[cursor]) {
+            return Err(());
+        }
+
+        converted.extend_from_slice(&[0, 0, 0, 1]);
+        converted.extend_from_slice(&data[cursor..cursor + nal_len]);
+        cursor += nal_len;
+    }
+
+    (!converted.is_empty()).then_some(converted).ok_or(())
+}
+
+fn valid_nal_header(header: u8) -> bool {
+    let nal_type = header & 0x1f;
+    header & 0x80 == 0 && (1..=23).contains(&nal_type)
 }
 
 #[cfg(test)]
 mod tests {
     use std::time::{Duration, Instant};
 
+    use openh264::{encoder::Encoder, formats::YUVBuffer};
     use phonecam_protocol::VideoFrame;
 
     use super::H264Decoder;
 
-    const SAMPLE_H264_ANNEX_B: &[u8] = &[
-        0x00, 0x00, 0x00, 0x01, 0x67, 0x42, 0xC0, 0x0A, 0xDC, 0x42, 0x6C, 0x04, 0x40, 0x00, 0x00,
-        0x03, 0x00, 0x40, 0x00, 0x00, 0x03, 0x00, 0xA3, 0xC4, 0x89, 0xE0, 0x00, 0x00, 0x00, 0x01,
-        0x68, 0xCE, 0x0F, 0xC8, 0x00, 0x00, 0x00, 0x01, 0x65, 0x88, 0x84, 0x3A, 0x26, 0x28, 0x00,
-        0x09, 0x02, 0xC9, 0xC9, 0xC9, 0xD7, 0x5D, 0x75, 0xD7, 0x5D, 0x75, 0xD7,
-    ];
+    fn sample_h264_annex_b() -> Vec<u8> {
+        let image = YUVBuffer::new(64, 64);
+        Encoder::new()
+            .expect("test encoder must initialize")
+            .encode(&image)
+            .expect("test frame must encode")
+            .to_vec()
+    }
 
     #[test]
     fn decode_h264_annex_b_to_nv12() {
         let mut decoder = H264Decoder::new().expect("decoder must initialize");
-        let nal_units = split_annex_b_nalus(SAMPLE_H264_ANNEX_B);
-        let mut frames = Vec::new();
-
-        for (index, nal_unit) in nal_units.iter().enumerate() {
-            let video_frame = VideoFrame {
-                nal_unit: nal_unit.to_vec().into(),
-                pts_us: (index as u64) * 33_333,
-                width: 64,
-                height: 64,
-                is_keyframe: index + 1 == nal_units.len(),
-            };
-
-            let output = decoder
-                .decode(&video_frame)
-                .expect("decode must succeed for sample stream");
-            frames.extend(output.frames);
-        }
+        let video_frame = VideoFrame {
+            nal_unit: sample_h264_annex_b().into(),
+            pts_us: 33_333,
+            width: 64,
+            height: 64,
+            is_keyframe: true,
+        };
+        let frames = decoder
+            .decode(&video_frame)
+            .expect("decode must succeed for sample stream")
+            .frames;
 
         assert!(!frames.is_empty(), "must emit at least one decoded frame");
 
@@ -104,7 +293,7 @@ mod tests {
         );
 
         let non_keyframe_after_error = VideoFrame {
-            nal_unit: split_annex_b_nalus(SAMPLE_H264_ANNEX_B)[0].to_vec().into(),
+            nal_unit: sample_h264_annex_b().into(),
             pts_us: 2,
             width: 64,
             height: 64,
@@ -120,7 +309,7 @@ mod tests {
         );
 
         let recovery_keyframe = VideoFrame {
-            nal_unit: SAMPLE_H264_ANNEX_B.to_vec().into(),
+            nal_unit: sample_h264_annex_b().into(),
             pts_us: 3,
             width: 64,
             height: 64,
@@ -139,12 +328,13 @@ mod tests {
     #[test]
     fn decode_latency_benchmark_sample_under_20ms() {
         let mut decoder = H264Decoder::new().expect("decoder must initialize");
+        let sample = sample_h264_annex_b();
         let mut total = Duration::ZERO;
         let iterations: u32 = 30;
 
         for index in 0..iterations {
             let frame = VideoFrame {
-                nal_unit: SAMPLE_H264_ANNEX_B.to_vec().into(),
+                nal_unit: sample.clone().into(),
                 pts_us: index as u64,
                 width: 64,
                 height: 64,
@@ -169,40 +359,5 @@ mod tests {
             average < Duration::from_millis(20),
             "expected <20ms average decode latency for sample stream, got {average:?}"
         );
-    }
-
-    fn split_annex_b_nalus(data: &[u8]) -> Vec<&[u8]> {
-        let mut units = Vec::new();
-        let mut i = 0;
-
-        while i + 3 < data.len() {
-            let start_code_len = if data[i..].starts_with(&[0x00, 0x00, 0x00, 0x01]) {
-                4
-            } else if data[i..].starts_with(&[0x00, 0x00, 0x01]) {
-                3
-            } else {
-                i += 1;
-                continue;
-            };
-
-            let nal_start = i + start_code_len;
-            let mut nal_end = data.len();
-            let mut cursor = nal_start;
-
-            while cursor + 3 < data.len() {
-                if data[cursor..].starts_with(&[0x00, 0x00, 0x00, 0x01])
-                    || data[cursor..].starts_with(&[0x00, 0x00, 0x01])
-                {
-                    nal_end = cursor;
-                    break;
-                }
-                cursor += 1;
-            }
-
-            units.push(&data[i..nal_end]);
-            i = nal_end;
-        }
-
-        units
     }
 }

@@ -6,7 +6,9 @@ plugins {
 }
 
 val repoRoot = rootProject.projectDir.parentFile
+val cargoLock = File(repoRoot, "Cargo.lock")
 val rustManifest = File(repoRoot, "rust/phonecam-mobile-core/Cargo.toml")
+val rustSources = File(repoRoot, "rust")
 val udlFile = File(repoRoot, "rust/phonecam-mobile-core/src/phonecam.udl")
 val rustJniLibsDir = layout.buildDirectory.dir("rustJniLibs/android").get().asFile
 val uniffiOutDir = layout.buildDirectory.dir("generated/source/uniffi")
@@ -14,6 +16,7 @@ val uniffiOutDir = layout.buildDirectory.dir("generated/source/uniffi")
 android {
     namespace = "com.phonecam.app"
     compileSdk = 34
+    ndkVersion = "26.1.10909125"
 
     defaultConfig {
         applicationId = "com.phonecam.app"
@@ -86,7 +89,11 @@ val ensureRustTargets by tasks.registering(Exec::class) {
 
 val ensureCargoNdk by tasks.registering(Exec::class) {
     description = "Install cargo-ndk if missing"
-    commandLine("sh", "-c", "command -v cargo-ndk >/dev/null 2>&1 || cargo install cargo-ndk --locked")
+    commandLine(
+        "sh",
+        "-c",
+        "command -v cargo-ndk >/dev/null 2>&1 || cargo install cargo-ndk --version 4.1.2 --locked",
+    )
 }
 
 val buildRustAndroid by tasks.registering(Exec::class) {
@@ -94,6 +101,8 @@ val buildRustAndroid by tasks.registering(Exec::class) {
     dependsOn(ensureRustTargets, ensureCargoNdk)
 
     inputs.file(rustManifest)
+    inputs.file(cargoLock)
+    inputs.dir(rustSources)
     outputs.dir(rustJniLibsDir)
 
     workingDir = repoRoot
@@ -112,12 +121,17 @@ val buildRustAndroid by tasks.registering(Exec::class) {
         "--manifest-path",
         rustManifest.absolutePath,
         "--release",
+        "--locked",
     )
 }
 
 val ensureUniffiBindgen by tasks.registering(Exec::class) {
     description = "Install uniffi-bindgen CLI if missing"
-    commandLine("sh", "-c", "command -v uniffi-bindgen >/dev/null 2>&1 || cargo install uniffi --locked --features cli")
+    commandLine(
+        "sh",
+        "-c",
+        "command -v uniffi-bindgen >/dev/null 2>&1 || cargo install uniffi --version 0.31.2 --locked --features cli",
+    )
 }
 
 val generateUniffiBindings by tasks.registering(Exec::class) {
@@ -147,6 +161,7 @@ val buildRustHostForTests by tasks.registering(Exec::class) {
         "build",
         "--manifest-path",
         rustManifest.absolutePath,
+        "--locked",
     )
 }
 

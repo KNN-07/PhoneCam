@@ -22,7 +22,10 @@
 namespace {
 
 constexpr REFERENCE_TIME kDefaultFrameDuration = 333333;
-constexpr ULONG kSupportedMediaTypeCount = 2;
+constexpr std::array<REFERENCE_TIME, 3> kSupportedFrameDurations = {666667, 333333, 166667};
+constexpr ULONG kSupportedResolutionCount = 3;
+constexpr ULONG kSupportedFrameRateCount = static_cast<ULONG>(kSupportedFrameDurations.size());
+constexpr ULONG kSupportedMediaTypeCount = kSupportedResolutionCount * kSupportedFrameRateCount;
 
 const GUID kMediaSubtypeYuyv = {
     MAKEFOURCC('Y', 'U', 'Y', 'V'),
@@ -754,10 +757,15 @@ STDMETHODIMP PhoneCamOutputPin::GetStreamCaps(int iIndex, AM_MEDIA_TYPE** ppmt, 
     caps->StretchTapsY = 0;
     caps->ShrinkTapsX = 0;
     caps->ShrinkTapsY = 0;
-    caps->MinFrameInterval = kDefaultFrameDuration;
-    caps->MaxFrameInterval = kDefaultFrameDuration;
+    caps->MinFrameInterval = video_info->AvgTimePerFrame;
+    caps->MaxFrameInterval = video_info->AvgTimePerFrame;
 
-    const std::int64_t bitrate = static_cast<std::int64_t>(width) * static_cast<std::int64_t>(height) * 12 * 30;
+    const std::int64_t frames_per_second =
+        video_info->AvgTimePerFrame > 0
+            ? (10000000 + (video_info->AvgTimePerFrame / 2)) / video_info->AvgTimePerFrame
+            : 30;
+    const std::int64_t bitrate =
+        static_cast<std::int64_t>(width) * static_cast<std::int64_t>(height) * 12 * frames_per_second;
     const LONG safe_bitrate =
         bitrate > std::numeric_limits<LONG>::max() ? std::numeric_limits<LONG>::max() : static_cast<LONG>(bitrate);
     caps->MinBitsPerSecond = safe_bitrate;
@@ -1029,6 +1037,21 @@ bool PhoneCamOutputPin::IsSupportedMediaType(const AM_MEDIA_TYPE* media_type) co
         return false;
     }
 
+    const bool supported_dimensions =
+        (width == 640 && height == 480) || (width == 1280 && height == 720) ||
+        (width == 1920 && height == 1080);
+    if (!supported_dimensions) {
+        return false;
+    }
+
+    const REFERENCE_TIME frame_duration = video_info->AvgTimePerFrame;
+    if (std::find(
+            kSupportedFrameDurations.begin(),
+            kSupportedFrameDurations.end(),
+            frame_duration) == kSupportedFrameDurations.end()) {
+        return false;
+    }
+
     if (media_type->subtype == MEDIASUBTYPE_NV12 && ((width % 2) != 0 || (height % 2) != 0)) {
         return false;
     }
@@ -1084,11 +1107,16 @@ HRESULT PhoneCamOutputPin::BuildMediaTypeForIndex(ULONG index, AM_MEDIA_TYPE* me
         return S_FALSE;
     }
 
+    const ULONG resolution_index = index / kSupportedFrameRateCount;
+    const ULONG frame_rate_index = index % kSupportedFrameRateCount;
+
     StreamFormat format{};
-    if (index == 0) {
-        format = {1280, 720, MEDIASUBTYPE_NV12, kDefaultFrameDuration};
+    if (resolution_index == 0) {
+        format = {640, 480, MEDIASUBTYPE_NV12, kSupportedFrameDurations[frame_rate_index]};
+    } else if (resolution_index == 1) {
+        format = {1280, 720, MEDIASUBTYPE_NV12, kSupportedFrameDurations[frame_rate_index]};
     } else {
-        format = {1920, 1080, MEDIASUBTYPE_NV12, kDefaultFrameDuration};
+        format = {1920, 1080, MEDIASUBTYPE_NV12, kSupportedFrameDurations[frame_rate_index]};
     }
 
     return BuildMediaType(format, media_type);

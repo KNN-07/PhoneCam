@@ -4,19 +4,23 @@ version = "0.1.0"
 description = "PhoneCam desktop client"
 authors = ["PhoneCam Contributors"]
 edition = "2021"
-rust-version = "1.77"
+rust-version = "1.77.2"
 
 [build-dependencies]
 tauri-build = { version = "2.0.0", features = [] }
 
 [dependencies]
-tauri = { version = "2.0.0", features = [] }
+tauri = { version = "=2.10.1", features = [] }
+# Tauri 2.10 accepts newer 2.x runtimes semantically, but 2.11 changed a
+# callback bound incompatibly. Keep the runtime pair on the matching line.
+tauri-runtime = "=2.10.0"
+tauri-runtime-wry = "=2.10.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tokio = { version = "1.0", features = ["full"] }
 log = "0.4"
 env_logger = "0.10"
-ffmpeg-next = "7.0"
+openh264 = "=0.6.5"
 qrcode = "0.14"
 local-ip-address = "0.6"
 
@@ -24,4 +28,9 @@ local-ip-address = "0.6"
 phonecam-transport = { path = "../../phonecam-transport" }
 phonecam-discovery = { path = "../../phonecam-discovery" }
 phonecam-protocol = { path = "../../phonecam-protocol" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
 phonecam-driver-linux = { path = "../../phonecam-driver-linux" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "0.2"
