@@ -22,7 +22,6 @@ add_library(
   src/dllmain.cpp
   src/filter.cpp
   src/output_pin.cpp
-  src/property_page.cpp
   src/frame_receiver.cpp
   src/guids.cpp
 )

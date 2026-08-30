@@ -21,21 +21,24 @@ struct CameraExtensionConfiguration {
         let fallbackDeviceID = "7E9F5417-21C7-430B-9018-486B7A1C64C0"
         let fallbackStreamID = "8A78CCEC-C80C-4D42-B51F-C755572164A2"
 
-        let appGroupIdentifier = (info["PhoneCamAppGroupIdentifier"] as? String)
-            ?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let appGroupIdentifier = (info["PhoneCamAppGroupIdentifier"] as? String)?.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
             .nonEmpty
             ?? fallbackAppGroup
 
         let deviceID = UUID(
-            uuidString: (info["PhoneCamDeviceUUID"] as? String)
-                ?.trimmingCharacters(in: .whitespacesAndNewlines)
+            uuidString: (info["PhoneCamDeviceUUID"] as? String)?.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            )
                 .nonEmpty
                 ?? fallbackDeviceID
         ) ?? UUID(uuidString: fallbackDeviceID)!
 
         let streamID = UUID(
-            uuidString: (info["PhoneCamStreamUUID"] as? String)
-                ?.trimmingCharacters(in: .whitespacesAndNewlines)
+            uuidString: (info["PhoneCamStreamUUID"] as? String)?.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            )
                 .nonEmpty
                 ?? fallbackStreamID
         ) ?? UUID(uuidString: fallbackStreamID)!
